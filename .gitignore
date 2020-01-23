@@ -1,2 +1,6 @@
 .idea
-data
+gtfs.db
+gtfs.zip
+gtfs_v1.db
+gtfs_v2.db
+NaPTANcsv.zip
