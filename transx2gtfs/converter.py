@@ -69,7 +69,7 @@ from multiprocessing import cpu_count
 import math
 import multiprocessing
 import argparse
-from transx2gtfs.data import get_path
+from transx2gtfs.data_util import get_path
 import os
 
 
@@ -671,9 +671,11 @@ def process_vehicle_journeys(vjourneys, service_jp_info, sections, service_opera
             # Section reference
             section_id = section.get_attribute('id')
 
-            # Generate trip_id (same section id might occure with different calendar info,
+            # Generate trip_id (same section id might occur with different calendar info,
             # hence attach weekday info as part of trip_id)
-            trip_id = "%s_%s" % (section_id, weekdays)
+            trip_id = "%s_%s_%s%s" % (section_id, weekdays,
+                                      str(hour).zfill(2),
+                                      str(minute).zfill(2))
 
             # Check that section-ids match
             if not section_id in jp_section_references:
@@ -964,7 +966,16 @@ def get_stop_times(gtfs_info):
     for col in int_types:
         stop_times[col] = stop_times[col].astype(int)
 
-    return stop_times
+    # If there is only a single sequence for a trip, do not export it
+    grouped = stop_times.groupby('trip_id')
+    filtered_stop_times = pd.DataFrame()
+    for idx, group in grouped:
+        if len(group) > 1:
+            filtered_stop_times = filtered_stop_times.append(group, ignore_index=True, sort=False)
+        else:
+            print("Only a single stop for trip '%s'. Excluding from GTFS." % idx)
+
+    return filtered_stop_times
 
 
 def parse_day_range(dayinfo):
@@ -982,7 +993,7 @@ def parse_day_range(dayinfo):
     day_info = pd.DataFrame()
 
     # Process 'weekend'
-    if "weekend" in dayinfo.lower():
+    if "weekend" in dayinfo.strip().lower():
         active_days.append('saturday')
         active_days.append('sunday')
 
@@ -1394,7 +1405,8 @@ def process_files(parallel):
         routes.to_sql(name='routes', con=conn, index=False, if_exists='append')
         agency.to_sql(name='agency', con=conn, index=False, if_exists='append')
         trips.to_sql(name='trips', con=conn, index=False, if_exists='append')
-        stop_times.to_sql(name='stop_times', con=conn, index=False, if_exists='append')
+        if len(stop_times) > 0:
+            stop_times.to_sql(name='stop_times', con=conn, index=False, if_exists='append')
         calendar.to_sql(name='calendar', con=conn, index=False, if_exists='append')
 
         if calendar_dates is not None:

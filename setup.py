@@ -5,6 +5,7 @@ from __future__ import print_function
 
 import io
 from glob import glob
+import os
 from os.path import basename
 from os.path import dirname
 from os.path import join
@@ -28,6 +29,11 @@ requirements = ['pandas>=0.24.1',
                 'datetime'
                 ]
 
+# get all data dirs in the datasets module
+data_files = []
+
+data_files.append("transx2gtfs/data/Stops.txt")
+
 setup(
     name='transx2gtfs',
     version='0.0.1',
@@ -36,9 +42,7 @@ setup(
     author='Henrikki Tenkanen',
     author_email='h.tenkanen@ucl.ac.uk',
     url='https://github.com/htenkanen/transx2gtfs',
-    packages=find_packages('transx2gtfs'),
-    package_dir={'': 'transx2gtfs'},
-    py_modules=[splitext(basename(path))[0] for path in glob('transx2gtfs/*.py')],
+    package_data={"transx2gtfs": data_files},
     include_package_data=True,
     zip_safe=False,
     classifiers=[

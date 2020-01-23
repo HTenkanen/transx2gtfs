@@ -1,0 +1,3 @@
+include transx2gtfs/data/Stops.txt
+include transx2gtfs/data/bank-holidays.json
+include transx2gtfs/data/test_data/tfl_33-RB5-_-y05-7.xml
