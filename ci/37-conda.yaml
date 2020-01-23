@@ -7,7 +7,6 @@ dependencies:
   - python=3.7
   # required
   - pandas
-  - datetime
   # testing
   - pytest
   - pytest-cov
