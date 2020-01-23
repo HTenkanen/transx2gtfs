@@ -25,7 +25,7 @@ requirements = ['pandas>=0.24.1',
 
 setup(
     name='transx2gtfs',
-    version='0.0.1',
+    version='0.1',
     license='MIT',
     description='A Python tool to convert TransXchange data into GTFS.',
     author='Henrikki Tenkanen',
@@ -36,7 +36,7 @@ setup(
     zip_safe=False,
     classifiers=[
         # complete classifier list: http://pypi.python.org/pypi?%3Aaction=list_classifiers
-        'Development Status :: 2 - Pre-Alpha',
+        'Development Status :: 3 - Alpha',
         'Intended Audience :: Developers',
         'License :: OSI Approved :: MIT License',
         'Operating System :: Unix',
