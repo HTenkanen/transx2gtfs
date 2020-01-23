@@ -2,15 +2,9 @@
 # -*- encoding: utf-8 -*-
 from __future__ import absolute_import
 from __future__ import print_function
-
 import io
-from glob import glob
-import os
-from os.path import basename
 from os.path import dirname
 from os.path import join
-from os.path import splitext
-
 from setuptools import find_packages
 from setuptools import setup
 
@@ -29,11 +23,6 @@ requirements = ['pandas>=0.24.1',
                 'datetime'
                 ]
 
-# get all data dirs in the datasets module
-data_files = []
-
-data_files.append("transx2gtfs/data/Stops.txt")
-
 setup(
     name='transx2gtfs',
     version='0.0.1',
@@ -42,7 +31,7 @@ setup(
     author='Henrikki Tenkanen',
     author_email='h.tenkanen@ucl.ac.uk',
     url='https://github.com/htenkanen/transx2gtfs',
-    package_data={"transx2gtfs": data_files},
+    packages=find_packages(),
     include_package_data=True,
     zip_safe=False,
     classifiers=[

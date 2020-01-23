@@ -50,7 +50,6 @@ Column Conversion table:
     | JourneyPatternRouteReference | route_id    |
     +------------------------------+-------------+
 
-
 Created on Fri Apr 26 16:52:57 2019
 
 @author: Dr. Henrikki Tenkanen, University College London
@@ -60,7 +59,6 @@ import pandas as pd
 from datetime import datetime, timedelta, time
 from time import time as timeit
 from zipfile import ZipFile, ZIP_DEFLATED
-import os
 import pyproj
 import sqlite3
 import glob
@@ -68,8 +66,7 @@ import csv
 from multiprocessing import cpu_count
 import math
 import multiprocessing
-import argparse
-from transx2gtfs.data_util import get_path
+from transx2gtfs.data import get_path
 import os
 
 
@@ -973,7 +970,7 @@ def get_stop_times(gtfs_info):
         if len(group) > 1:
             filtered_stop_times = filtered_stop_times.append(group, ignore_index=True, sort=False)
         else:
-            print("Only a single stop for trip '%s'. Excluding from GTFS." % idx)
+            print("Trip '%s' does not include a sequence of stops, excluding from GTFS." % idx)
 
     return filtered_stop_times
 
