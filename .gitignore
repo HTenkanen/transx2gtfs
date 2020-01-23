@@ -1,4 +1,6 @@
 .idea
+build
+dist
 gtfs.db
 gtfs.zip
 gtfs_v1.db
