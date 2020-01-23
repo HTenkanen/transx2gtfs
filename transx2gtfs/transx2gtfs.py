@@ -981,8 +981,13 @@ def parse_day_range(dayinfo):
     active_days = []
     day_info = pd.DataFrame()
 
+    # Process 'weekend'
+    if "weekend" in dayinfo.lower():
+        active_days.append('saturday')
+        active_days.append('sunday')
+
     # Check if dayinfo is specified as day-range
-    if "To" in dayinfo:
+    elif "To" in dayinfo:
         day_range = dayinfo.split('To')
         start_i = weekday_to_num[day_range[0].lower()]
         end_i = weekday_to_num[day_range[1].lower()]
@@ -997,11 +1002,6 @@ def parse_day_range(dayinfo):
         days = dayinfo.split('|')
         for day in days:
             active_days.append(weekday_to_num[day.lower()])
-
-    # Process 'weekend'
-    elif "weekend" in dayinfo.lower():
-        active_days.append('saturday')
-        active_days.append('sunday')
 
     # If input is only a single day
     else:

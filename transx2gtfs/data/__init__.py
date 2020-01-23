@@ -5,6 +5,7 @@ __all__ = ["available", "get_path"]
 _module_path = os.path.dirname(__file__)
 _available_files = {"naptan_stops": "Stops.txt",
                     "bank_holidays": "bank-holidays.json",
+                    "test_data_dir": "test_data"
                     }
 available = list(_available_files.keys())
 
