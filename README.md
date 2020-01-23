@@ -1,4 +1,4 @@
-# transx2gtfs
+# transx2gtfs [![build status](https://travis-ci.com/HTenkanen/transx2gtfs/transx2gtfs.png?branch=master)](https://travis-ci.org/HTenkanen/transx2gtfs)
 
 This is a small library to convert transit data from TransXchange format into GTFS -format that
 can be used with various routing engines such as OpenTripPlanner. 
