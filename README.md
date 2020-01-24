@@ -26,7 +26,7 @@ The package is available at PyPi and you can install it with:
 
 `$ pip install transx2gtfs`
 
-Library works and is being tested with Python versions 3.5, 3.6, 3.7 and 3.8.  
+Library works and is being tested with Python versions 3.6, 3.7 and 3.8.  
 
 ## Basic usage
 
