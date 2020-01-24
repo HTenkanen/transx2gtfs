@@ -1316,23 +1316,13 @@ def save_to_gtfs_zip(output_zip_fp, gtfs_data):
         for name, data in gtfs_data.items():
             fname = "{filename}.txt".format(filename=name)
 
-            # Add quotion marks for specific columns to ensure that naming of the stop does not
-            # affect the output csv (e.g. stop-names might have commas that cause conflicts)
-            #            if name == "stops":
-            #                for col in _quote_attributes:
-            #                    if col in data.columns:
-            #                        data[col] = '"' + data[col] + '"'
-            #
-            #            if name == "stop_times":
-            #                for col in _quote_attributes:
-            #                    if col in data.columns:
-            #                        data[col] = '"' + data[col] + '"'
-
             if data is not None:
                 if len(data) > 0:
                     print("Exporting:", fname)
                     # Save
-                    buffer = data.to_csv(None, sep=',', index=False, quoting=csv.QUOTE_NONE, escapechar="'")
+                    buffer = data.to_csv(None, sep=',', index=False,
+                                         quotechar='"',
+                                         quoting=csv.QUOTE_NONNUMERIC)
 
                     zf.writestr(fname, buffer, compress_type=ZIP_DEFLATED)
                 else:
