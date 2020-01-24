@@ -18,9 +18,8 @@ def read(*names, **kwargs):
 
 
 requirements = ['pandas',
-                'pyproj'
+                'pyproj',
                 'untangle'
-                'datetime'
                 ]
 
 setup(
