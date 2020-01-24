@@ -12,7 +12,7 @@ help solving them by [raising an issue](https://github.com/HTenkanen/transx2gtfs
 
 ## Features
 
- - Reads TransXchange xml-files and converts into GTFS feed with all necessary information. 
+ - Reads TransXchange xml-files and converts into GTFS feed with all necessary information 
  according the General Transit Feed Specification.
  - Combines multiple TransXchange files into a single GTFS feed if present in the same folder.
  - Uses multiprocessing to parallelize the conversion process.
