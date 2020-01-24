@@ -5,7 +5,11 @@ cache: false
 matrix:
   include:
       # Only one test for these Python versions
+      - env: ENV_FILE="ci/35-conda.yaml"
+      - env: ENV_FILE="ci/36-conda.yaml"
       - env: ENV_FILE="ci/37-conda.yaml"
+      - env: ENV_FILE="ci/38-conda.yaml"
+
 
 install:
   # Install conda
