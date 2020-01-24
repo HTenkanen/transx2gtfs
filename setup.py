@@ -49,7 +49,7 @@ setup(
         'Programming Language :: Python :: 3.7',
         'Topic :: Utilities',
     ],
-    python_requires='>=3, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*, <3.8',
+    python_requires='>=3, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*, <3.9',
     install_requires=[
         requirements
     ],
