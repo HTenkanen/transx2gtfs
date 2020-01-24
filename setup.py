@@ -17,9 +17,9 @@ def read(*names, **kwargs):
         return fh.read()
 
 
-requirements = ['pandas>=0.24.1',
-                'pyproj>=2.1.3'
-                'untangle>=1.1.1'
+requirements = ['pandas',
+                'pyproj'
+                'untangle'
                 'datetime'
                 ]
 
