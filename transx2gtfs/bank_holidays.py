@@ -1,5 +1,6 @@
 import pandas as pd
 from datetime import datetime
+from urllib.error import HTTPError
 
 
 def get_bank_holiday_dates(gtfs_info, bank_holidays_region='england-and-wales'):
@@ -9,7 +10,8 @@ def get_bank_holiday_dates(gtfs_info, bank_holidays_region='england-and-wales'):
     Available regions: 'england-and-wales', 'scotland', 'northern-ireland'
     """
     available_regions = ['england-and-wales', 'scotland', 'northern-ireland']
-    assert bank_holidays_region in available_regions, "You need to use one of the following regions: %s" % available_regions
+    if bank_holidays_region not in available_regions:
+        raise ValueError("You need to use one of the following regions: %s" % available_regions)
 
     # Get bank holidays from UK Gov
     bank_holidays_url = "https://www.gov.uk/bank-holidays.json"
@@ -18,7 +20,7 @@ def get_bank_holiday_dates(gtfs_info, bank_holidays_region='england-and-wales'):
     try:
         bholidays = pd.read_json(bank_holidays_url)
     # If url is unreachable use static file from the package
-    except:
+    except HTTPError:
         print("Could not read bank holidays via Internet, using static file instead.")
         bholidays = pd.read_json("data/bank-holidays.json")
 
