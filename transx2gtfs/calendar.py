@@ -53,8 +53,8 @@ def parse_day_range(dayinfo):
 
     # Process 'weekend'
     if "weekend" in dayinfo.strip().lower():
-        active_days.append('saturday')
-        active_days.append('sunday')
+        active_days.append(5)
+        active_days.append(6)
 
     # Check if dayinfo is specified as day-range
     elif "To" in dayinfo:
