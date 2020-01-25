@@ -173,16 +173,22 @@ def process_files(parallel):
         # Initialize database connection
         conn = sqlite3.connect(gtfs_db)
 
-        stop_data.to_sql(name='stops', con=conn, index=False, if_exists='append')
-        routes.to_sql(name='routes', con=conn, index=False, if_exists='append')
-        agency.to_sql(name='agency', con=conn, index=False, if_exists='append')
-        trips.to_sql(name='trips', con=conn, index=False, if_exists='append')
+        # Only export data into db if there exists valid stop_times data
         if len(stop_times) > 0:
             stop_times.to_sql(name='stop_times', con=conn, index=False, if_exists='append')
-        calendar.to_sql(name='calendar', con=conn, index=False, if_exists='append')
+            stop_data.to_sql(name='stops', con=conn, index=False, if_exists='append')
+            routes.to_sql(name='routes', con=conn, index=False, if_exists='append')
+            agency.to_sql(name='agency', con=conn, index=False, if_exists='append')
+            trips.to_sql(name='trips', con=conn, index=False, if_exists='append')
+            calendar.to_sql(name='calendar', con=conn, index=False, if_exists='append')
 
-        if calendar_dates is not None:
-            calendar_dates.to_sql(name='calendar_dates', con=conn, index=False, if_exists='append')
+            if calendar_dates is not None:
+                calendar_dates.to_sql(name='calendar_dates', con=conn, index=False, if_exists='append')
+        else:
+            print(
+                "UserWarning: File %s did not contain valid stop_sequence data, skipping." % (
+                    os.path.basename(fp))
+            )
 
         # Close connection
         conn.close()
