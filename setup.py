@@ -24,7 +24,7 @@ requirements = ['pandas',
 
 setup(
     name='transx2gtfs',
-    version='0.2',
+    version='0.3',
     license='MIT',
     description='A Python tool to convert TransXchange data into GTFS.',
     author='Henrikki Tenkanen',
