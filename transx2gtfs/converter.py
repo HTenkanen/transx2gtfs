@@ -4,7 +4,6 @@ Convert transXchange data format to GTFS format.
 
 TODO:
     - Parallelize the JourneyPattern iteration into multiple threads
-    - Modularize into class and optimize (now duplicate information generated in the first phase)
 
 See Python reference (not maintained) for conversion from: https://github.com/adamlukemooney/txc2gtfs
 
@@ -50,9 +49,16 @@ Column Conversion table:
     | JourneyPatternRouteReference | route_id    |
     +------------------------------+-------------+
 
-Created on Fri Apr 26 16:52:57 2019
 
-@author: Dr. Henrikki Tenkanen, University College London
+Author
+------
+Dr. Henrikki Tenkanen, University College London
+
+License
+-------
+
+MIT.
+
 """
 import untangle
 from time import time as timeit
@@ -192,7 +198,20 @@ def process_files(parallel):
         # ===================
 
 
-def convert(data_dir, output_filepath):
+def convert(data_dir, output_filepath, append_to_existing=False):
+    """
+    Converts TransXchange formatted schedule data into GTFS feed.
+
+    data_dir : str
+        Data directory containing one or multiple TransXchange .xml files.
+    output_filepath : str
+        Full filepath to the output GTFS zip-file, e.g. '/home/myuser/data/my_gtfs.zip'
+    append_to_existing : bool (default is False)
+        Flag for appending to existing gtfs-database. This might be useful if you have
+        TransXchange .xml files distributed into multiple directories (e.g. separate files for
+        train data, tube data and bus data) and you want to merge all those datasets into a single
+        GTFS feed.
+    """
     # Total start
     tot_start_t = timeit()
 
@@ -200,11 +219,8 @@ def convert(data_dir, output_filepath):
     target_dir = os.path.dirname(output_filepath)
     gtfs_db = os.path.join(target_dir, "gtfs.db")
 
-    # Append to same database?
-    append_to_db = False
-
     # If append to database is false remove previous gtfs-database if it exists
-    if append_to_db == False:
+    if append_to_existing == False:
         if os.path.exists(gtfs_db):
             os.remove(gtfs_db)
 
