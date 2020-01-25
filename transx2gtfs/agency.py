@@ -13,10 +13,9 @@ def get_agency_url(operator_code):
         'OId_TCL': "https://tfl.gov.uk/modes/trams/",
         'OId_EAL': "https://www.emiratesairline.co.uk/"
     }
-    try:
-        url = operator_urls[operator_code]
-        return url
-    except:
+    if operator_code in list(operator_urls.keys()):
+        return operator_urls[operator_code]
+    else:
         return "NA"
 
 def get_agency(data):
@@ -25,7 +24,6 @@ def get_agency(data):
     agency_data = pd.DataFrame()
 
     # Agency id
-    # agency_id = data.TransXChange.Operators.Operator.OperatorCode.cdata
     agency_id = data.TransXChange.Operators.Operator.get_attribute('id')
 
     # Agency name
@@ -37,7 +35,7 @@ def get_agency(data):
     # Agency timezone
     agency_tz = "Europe/London"
 
-    # Agency langunage
+    # Agency language
     agency_lang = "en"
 
     # Parse row
