@@ -5,6 +5,7 @@ from __future__ import print_function
 import io
 from os.path import dirname
 from os.path import join
+from os import path
 from setuptools import find_packages
 from setuptools import setup
 
@@ -22,11 +23,18 @@ requirements = ['pandas',
                 'untangle'
                 ]
 
+# read the contents of README file
+this_directory = path.abspath(path.dirname(__file__))
+with open(path.join(this_directory, 'README.md'), encoding='utf-8') as f:
+    long_description = f.read()
+
 setup(
     name='transx2gtfs',
-    version='0.3',
+    version='0.3.1',
     license='MIT',
     description='A Python tool to convert TransXchange data into GTFS.',
+    long_description=long_description,
+    long_description_content_type='text/markdown',
     author='Henrikki Tenkanen',
     author_email='h.tenkanen@ucl.ac.uk',
     url='https://github.com/htenkanen/transx2gtfs',
