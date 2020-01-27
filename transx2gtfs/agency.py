@@ -5,13 +5,13 @@ def get_agency_url(operator_code):
     operator_urls = {
         'OId_LUL': "https://tfl.gov.uk/maps/track/tube",
         'OId_DLR': "https://tfl.gov.uk/modes/dlr/",
-        'OId_CRC': "https://www.crownrivercruise.co.uk/",
         'OId_TRS': "https://www.thamesriverservices.co.uk/",
         'OId_CCR': "https://www.citycruises.com/",
         'OId_CV': "https://www.thamesclippers.com/",
         'OId_WFF': "https://tfl.gov.uk/modes/river/woolwich-ferry",
         'OId_TCL': "https://tfl.gov.uk/modes/trams/",
-        'OId_EAL': "https://www.emiratesairline.co.uk/"
+        'OId_EAL': "https://www.emiratesairline.co.uk/",
+        #'OId_CRC': "https://www.crownrivercruise.co.uk/",
     }
     if operator_code in list(operator_urls.keys()):
         return operator_urls[operator_code]
