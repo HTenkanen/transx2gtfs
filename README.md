@@ -1,5 +1,5 @@
 # transx2gtfs 
-[![PyPI version](https://badge.fury.io/py/transx2gtfs.svg)](https://badge.fury.io/py/transx2gtfs) [![build status](https://travis-ci.com/HTenkanen/transx2gtfs.svg?branch=master)](https://travis-ci.com/HTenkanen/transx2gtfs) [![Coverage Status](https://codecov.io/gh/HTenkanen/transx2gtfs/branch/master/graph/badge.svg)](https://codecov.io/gh/HTenkanen/transx2gtfs)
+[![PyPI version](https://badge.fury.io/py/transx2gtfs.svg)](https://badge.fury.io/py/transx2gtfs) [![build status](https://travis-ci.com/HTenkanen/transx2gtfs.svg?branch=master)](https://travis-ci.com/HTenkanen/transx2gtfs) [![Coverage Status](https://codecov.io/gh/HTenkanen/transx2gtfs/branch/master/graph/badge.svg)](https://codecov.io/gh/HTenkanen/transx2gtfs) [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.3628737.svg)](https://doi.org/10.5281/zenodo.3628737)
 
 This is a small library to convert transit data from TransXchange format into GTFS -format that
 can be used with various routing engines such as OpenTripPlanner. 
@@ -49,7 +49,7 @@ multimodal routing with your favourite routing engine such as OpenTripPlanner:
 
 If you use this tool for research purposes, we encourage you to cite this work:
 
- - *TODO: Add Zenodo*
+ - Henrikki Tenkanen. (2020, January 27). HTenkanen/transx2gtfs: transx2gtfs v0.3.3.1 (Version v0.3.3.1). Zenodo. http://doi.org/10.5281/zenodo.3628737
 
 ## Developers
 
