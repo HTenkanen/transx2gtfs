@@ -174,4 +174,12 @@ def get_stops(data, naptan_stops_fp=None):
     else:
         raise ValueError("Could not parse Stop information from the TransXchange.")
 
-    return stop_data[keep_cols].copy()
+    # Check that stops were found
+    if len(stop_data) == 0:
+        return None
+
+    # Check that required columns exist
+    for col in keep_cols:
+        if col not in stop_data.columns:
+            return None
+    return stop_data

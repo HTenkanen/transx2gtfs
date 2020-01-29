@@ -149,6 +149,10 @@ def process_files(parallel):
         # Parse stops
         stop_data = get_stops(data, naptan_stops_fp=naptan_stops_fp)
 
+        if stop_data is None:
+            print("Did not found any valid stops. Skipping..")
+            continue
+
         # Parse agency
         agency = get_agency(data)
 
