@@ -52,6 +52,8 @@ def get_calendar_dates(gtfs_info, bank_holidays_region='england-and-wales'):
                       'GoodFriday': 'Good Friday'}
 
     # Get initial info about non-operative days
+    gtfs_info = gtfs_info.copy()
+    gtfs_info = gtfs_info.dropna(subset=['non_operative_days'])
     non_operative_values = list(gtfs_info['non_operative_days'].unique())
 
     # Container for all info
@@ -60,7 +62,7 @@ def get_calendar_dates(gtfs_info, bank_holidays_region='england-and-wales'):
     # Parse all non operative ones
     for info in non_operative_values:
         # Check if info consists of multiple values
-        if (info is not None) and "|" in info:
+        if isinstance(info, str) and "|" in info:
             split = info.split('|')
             non_operatives += split
         else:

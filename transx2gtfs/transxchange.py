@@ -6,6 +6,53 @@ from transx2gtfs.stop_times import generate_service_id, get_direction
 from transx2gtfs.routes import get_mode
 
 
+def get_last_stop_time_info(link, hour,
+                            current_date, current_dt,
+                            duration, stop_num, boarding_time):
+    # Parse stop_id for TO
+    stop_id = link.To.StopPointRef.cdata
+    # Get arrival time for the last one
+    current_dt = current_dt + timedelta(seconds=duration)
+    departure_dt = current_dt + timedelta(seconds=boarding_time)
+    # Get hour info
+    arrival_hour = current_dt.hour
+    departure_hour = departure_dt.hour
+    # Ensure trips passing midnight are formatted correctly
+    arrival_hour, departure_hour = get_midnight_formatted_times(arrival_hour, departure_hour,
+                                                                hour, current_date, current_dt,
+                                                                departure_dt)
+    # Convert to string
+    arrival_t = "{arrival_hour}:{minsecs}".format(arrival_hour=str(arrival_hour).zfill(2),
+                                                  minsecs=current_dt.strftime("%M:%S"))
+    departure_t = "{departure_hour}:{minsecs}".format(departure_hour=str(departure_hour).zfill(2),
+                                                      minsecs=departure_dt.strftime("%M:%S"))
+
+    info = dict(stop_id=stop_id,
+                stop_sequence=stop_num,
+                arrival_time=arrival_t,
+                departure_time=departure_t)
+    return info
+
+
+def get_midnight_formatted_times(arrival_hour, departure_hour, hour, current_date, current_dt, departure_dt):
+    # If the arrival / departure hour is smaller than the initialized hour,
+    # it means that the trip is extending to the next day. In that case,
+    # the hour info should be extending to numbers over 24. E.g. if trip starts
+    # at 23:30 and ends at 00:25, the arrival_time should be determined as 24:25
+    # to avoid negative time hops.
+    if arrival_hour < hour:
+        # Calculate time delta (in hours) between the initial trip datetime and the current
+        # and add 1 to hop over the midnight to the next day
+        last_second_of_day = datetime.combine(current_date, time(23, 59, 59))
+        arrival_over_midnight_surplus = int(((current_dt - last_second_of_day) / 60 / 60).seconds) + 1
+        departure_over_midnight_surplus = int(((departure_dt - last_second_of_day) / 60 / 60).seconds) + 1
+
+        # Update the hour values with midnight surplus
+        arrival_hour = 23 + arrival_over_midnight_surplus
+        departure_hour = 23 + departure_over_midnight_surplus
+
+    return arrival_hour, departure_hour
+
 def process(vjourneys):
     """Process vehicle journeys"""
     # Number of journeys to process
@@ -58,6 +105,10 @@ def process_vehicle_journeys(vjourneys, service_jp_info, sections, service_opera
     # Get current date for time reference
     current_date = datetime.now().date()
 
+    # If additional boarding time is needed, specify it here
+    # Boarding time in seconds
+    boarding_time = 0
+
     # Iterate over VehicleJourneys
     for i, journey in enumerate(vjourneys):
         if i != 0 and i % 50 == 0:
@@ -108,9 +159,6 @@ def process_vehicle_journeys(vjourneys, service_jp_info, sections, service_opera
 
         current_dt = None
 
-        # Container for timing info
-        journey_info = pd.DataFrame()
-
         # Iterate over a single departure section
         stop_num = 1
         for section in sections:
@@ -156,31 +204,16 @@ def process_vehicle_journeys(vjourneys, service_jp_info, sections, service_opera
                     # Timepoint
                     timepoint = 0
 
-                    # If additional boarding time is needed, specify it here
-                    # Boarding time in seconds
-                    boarding_time = 0
-
                     departure_dt = current_dt + timedelta(seconds=boarding_time)
 
                 # Get hour info
                 arrival_hour = current_dt.hour
                 departure_hour = departure_dt.hour
 
-                # If the arrival / departure hour is smaller than the initialized hour,
-                # it means that the trip is extending to the next day. In that case,
-                # the hour info should be extending to numbers over 24. E.g. if trip starts
-                # at 23:30 and ends at 00:25, the arrival_time should be determined as 24:25
-                # to avoid negative time hops.
-                if arrival_hour < hour:
-                    # Calculate time delta (in hours) between the initial trip datetime and the current
-                    # and add 1 to hop over the midnight to the next day
-                    last_second_of_day = datetime.combine(current_date, time(23, 59, 59))
-                    arrival_over_midnight_surplus = int(((current_dt - last_second_of_day) / 60 / 60).seconds) + 1
-                    departure_over_midnight_surplus = int(((departure_dt - last_second_of_day) / 60 / 60).seconds) + 1
-
-                    # Update the hour values with midnight surplus
-                    arrival_hour = 23 + arrival_over_midnight_surplus
-                    departure_hour = 23 + departure_over_midnight_surplus
+                # Ensure trips passing midnight are formatted correctly
+                arrival_hour, departure_hour = get_midnight_formatted_times(arrival_hour, departure_hour,
+                                                                            hour, current_date, current_dt,
+                                                                            departure_dt)
 
                 # Convert to string
                 arrival_t = "{arrival_hour}:{minsecs}".format(arrival_hour=str(arrival_hour).zfill(2),
@@ -222,13 +255,33 @@ def process_vehicle_journeys(vjourneys, service_jp_info, sections, service_opera
                 # Update stop number
                 stop_num += 1
 
-            # Add to journey DataFrame
-            journey_info = journey_info.append(section_times, ignore_index=True, sort=False)
+            # After timing links have been iterated over,
+            # the last stop needs to be added separately
+            info = get_last_stop_time_info(link, hour,
+                                           current_date, current_dt,
+                                           duration, stop_num, boarding_time)
 
-        # Merge into stop times
-        gtfs_info = gtfs_info.append(journey_info, ignore_index=True, sort=False)
+            info['timepoint'] = 0
+            info['route_link_ref'] = route_link_ref
+            info['agency_id'] = agency_id
+            info['trip_id'] = trip_id
+            info['route_id'] = route_id
+            info['vehicle_journey_id'] = vehicle_journey_id
+            info['service_ref'] = service_ref
+            info['direction_id'] = direction_id
+            info['line_name'] = line_name
+            info['travel_mode'] = travel_mode
+            info['trip_headsign'] = trip_headsign
+            info['vehicle_type'] = vehicle_type
+            info['start_date'] = start_date
+            info['end_date'] = end_date
+            info['weekdays'] = weekdays
+            section_times = section_times.append(info, ignore_index=True, sort=False)
 
-        # Generate service_id column into the table
+        # Add to GTFS DataFrame
+        gtfs_info = gtfs_info.append(section_times, ignore_index=True, sort=False)
+
+    # Generate service_id column into the table
     gtfs_info = generate_service_id(gtfs_info)
 
     return gtfs_info
