@@ -146,6 +146,8 @@ def _get_txc_21_style_stops(data, naptan_stops_fp):
                             stop_lon=x,
                             stop_url=None
                             )
+            elif len(stop) > 1:
+                raise ValueError("Had more than 1 stop with identical stop reference.")
         # If stop location cannot be determined do not add it to the stops frame.
         except Exception as e:
             print(e)
