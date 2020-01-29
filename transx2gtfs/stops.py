@@ -46,7 +46,7 @@ def _get_tfl_style_stops(data, naptan_stops_fp):
 
         # If NAPTAN db does not contain the info, try to parse from the data directly
 
-        if len(stop) != 1:
+        if len(stop) == 0:
             # print("Could not find stop_id '%s' from Naptan database. Using coordinates directly from TransXChange." % stop_id)
             # X and y coordinates - Notice: these might not be available! --> Use NAPTAN database
             # Spatial reference - TransXChange might use:
@@ -77,6 +77,9 @@ def _get_tfl_style_stops(data, naptan_stops_fp):
                         stop_lon=x,
                         stop_url=None
                         )
+
+        elif len(stop) > 1:
+            raise ValueError("Had more than 1 stop with identical stop reference.")
 
         # Add to container
         stop_data = stop_data.append(stop, ignore_index=True, sort=False)
