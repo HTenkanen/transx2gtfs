@@ -45,42 +45,38 @@ def _get_tfl_style_stops(data, naptan_stops_fp):
         stop = naptan_stops.loc[naptan_stops[_stop_id_col] == stop_id]
 
         # If NAPTAN db does not contain the info, try to parse from the data directly
-        try:
-            if len(stop) != 1:
-                # print("Could not find stop_id '%s' from Naptan database. Using coordinates directly from TransXChange." % stop_id)
-                # X and y coordinates - Notice: these might not be available! --> Use NAPTAN database
-                # Spatial reference - TransXChange might use:
-                #   - OSGB36 (epsg:7405) spatial reference: https://spatialreference.org/ref/epsg/osgb36-british-national-grid-odn-height/
-                #   - WGS84 (epsg:4326)
-                # Detected epsg
-                detected_epsg = None
-                x = float(p.Place.Location.Easting.cdata)
-                y = float(p.Place.Location.Northing.cdata)
 
-                # Detect the most probable CRS at the first iteration
-                if detected_epsg is None:
-                    # Check if the coordinates are in meters
-                    if x > 180:
-                        detected_epsg = 7405
-                    else:
-                        detected_epsg = 4326
+        if len(stop) != 1:
+            # print("Could not find stop_id '%s' from Naptan database. Using coordinates directly from TransXChange." % stop_id)
+            # X and y coordinates - Notice: these might not be available! --> Use NAPTAN database
+            # Spatial reference - TransXChange might use:
+            #   - OSGB36 (epsg:7405) spatial reference: https://spatialreference.org/ref/epsg/osgb36-british-national-grid-odn-height/
+            #   - WGS84 (epsg:4326)
+            # Detected epsg
+            detected_epsg = None
+            x = float(p.Place.Location.Easting.cdata)
+            y = float(p.Place.Location.Northing.cdata)
 
-                # Convert point coordinates to WGS84 if they are in OSGB36
-                if detected_epsg == 7405:
-                    x, y = pyproj.transform(p1=osgb36, p2=wgs84, x=x, y=y)
+            # Detect the most probable CRS at the first iteration
+            if detected_epsg is None:
+                # Check if the coordinates are in meters
+                if x > 180:
+                    detected_epsg = 7405
+                else:
+                    detected_epsg = 4326
 
-                # Create row
-                stop = dict(stop_id=stop_id,
-                            stop_code=None,
-                            stop_name=stop_name,
-                            stop_lat=y,
-                            stop_lon=x,
-                            stop_url=None
-                            )
-        # If stop location cannot be determined do not add it to the stops frame.
-        except Exception as e:
-            print(e)
-            continue
+            # Convert point coordinates to WGS84 if they are in OSGB36
+            if detected_epsg == 7405:
+                x, y = pyproj.transform(p1=osgb36, p2=wgs84, x=x, y=y)
+
+            # Create row
+            stop = dict(stop_id=stop_id,
+                        stop_code=None,
+                        stop_name=stop_name,
+                        stop_lat=y,
+                        stop_lon=x,
+                        stop_url=None
+                        )
 
         # Add to container
         stop_data = stop_data.append(stop, ignore_index=True, sort=False)
@@ -116,6 +112,8 @@ def _get_txc_21_style_stops(data, naptan_stops_fp):
         stop = naptan_stops.loc[naptan_stops[_stop_id_col] == stop_id]
 
         # If NAPTAN db does not contain the info, try to parse from the data directly
+        # Note: this seems not to be part of the data in TXC 2.1 schema
+        # TODO: Remove?
         try:
             if len(stop) != 1:
                 # print("Could not find stop_id '%s' from Naptan database. Using coordinates directly from TransXChange." % stop_id)
