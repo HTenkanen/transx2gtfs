@@ -136,9 +136,9 @@ def test_get_calendar_tfl(test_tfl_data):
     correct_frame = DataFrame({
         'service_id': ["1-HAM-_-y05-2675925_20190713_20190714_Sunday",
                        "1-HAM-_-y05-2675925_20190713_20190714_Saturday"],
-        'monday': np.int32([0, 0]), 'tuesday': np.int32([0, 0]), 'wednesday': np.int32([0, 0]),
-        'thursday': np.int32([0, 0]), 'friday': np.int32([0, 0]),
-        'saturday': np.int32([0, 1]), 'sunday': np.int32([1, 0]),
+        'monday': np.int64([0, 0]), 'tuesday': np.int64([0, 0]), 'wednesday': np.int64([0, 0]),
+        'thursday': np.int64([0, 0]), 'friday': np.int64([0, 0]),
+        'saturday': np.int64([0, 1]), 'sunday': np.int64([1, 0]),
         'start_date': ["20190713", "20190713"],
         'end_date': ["20190714", "20190714"],
     }, index=[0, 1])
@@ -167,9 +167,9 @@ def test_get_calendar_txc21(test_txc21_data):
     correct_frame = DataFrame({
         'service_id': ["99-PIC-B-y05-4_20200201_20200202_Sunday",
                        "99-PIC-B-y05-4_20200201_20200202_Saturday"],
-        'monday': np.int32([0, 0]), 'tuesday': np.int32([0, 0]), 'wednesday': np.int32([0, 0]),
-        'thursday': np.int32([0, 0]), 'friday': np.int32([0, 0]),
-        'saturday': np.int32([0, 1]), 'sunday': np.int32([1, 0]),
+        'monday': np.int64([0, 0]), 'tuesday': np.int64([0, 0]), 'wednesday': np.int64([0, 0]),
+        'thursday': np.int64([0, 0]), 'friday': np.int64([0, 0]),
+        'saturday': np.int64([0, 1]), 'sunday': np.int64([1, 0]),
         'start_date': ["20200201", "20200201"],
         'end_date': ["20200202", "20200202"],
     }, index=[0, 1])
