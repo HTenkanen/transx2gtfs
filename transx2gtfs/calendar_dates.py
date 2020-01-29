@@ -49,7 +49,8 @@ def get_calendar_dates(gtfs_info, bank_holidays_region='england-and-wales'):
     known_holidays = {'SpringBank': 'Spring bank holiday',
                       'LateSummerBankHolidayNotScotland': 'Summer bank holiday',
                       'MayDay': 'Early May bank holiday',
-                      'GoodFriday': 'Good Friday'}
+                      'GoodFriday': 'Good Friday',
+                      'EasterMonday': 'Easter Monday'}
 
     # Get initial info about non-operative days
     gtfs_info = gtfs_info.copy()
