@@ -164,8 +164,8 @@ def _get_txc_21_style_stops(data, naptan_stops_fp):
 
 def get_stops(data, naptan_stops_fp=None):
     """Parse stop data from TransXchange elements"""
-    keep_cols = ['stop_id', 'stop_code', 'stop_name',
-                 'stop_lat', 'stop_lon', 'stop_url']
+    required_cols = ['stop_id', 'stop_name',
+                     'stop_lat', 'stop_lon']
 
     if 'StopPoint' in data.TransXChange.StopPoints.__dir__():
         stop_data = _get_tfl_style_stops(data, naptan_stops_fp)
@@ -179,7 +179,12 @@ def get_stops(data, naptan_stops_fp=None):
         return None
 
     # Check that required columns exist
-    for col in keep_cols:
+    for col in required_cols:
         if col not in stop_data.columns:
             return None
+
+    # Vehicle type is not needed
+    if 'vehicle_type' in stop_data.columns:
+        stop_data = stop_data.drop('vehicle_type', axis=1)
+
     return stop_data
