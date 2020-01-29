@@ -159,10 +159,14 @@ def _get_txc_21_style_stops(data, naptan_stops_fp):
 
 def get_stops(data, naptan_stops_fp=None):
     """Parse stop data from TransXchange elements"""
+    keep_cols = ['stop_id', 'stop_code', 'stop_name',
+                 'stop_lat', 'stop_lon', 'stop_url']
 
     if 'StopPoint' in data.TransXChange.StopPoints.__dir__():
         stop_data = _get_tfl_style_stops(data, naptan_stops_fp)
     elif 'AnnotatedStopPointRef' in data.TransXChange.StopPoints.__dir__():
         stop_data = _get_txc_21_style_stops(data, naptan_stops_fp)
+    else:
+        raise ValueError("Could not parse Stop information from the TransXchange.")
 
-    return stop_data
+    return stop_data[keep_cols].copy()
