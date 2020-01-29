@@ -115,7 +115,7 @@ def _get_txc_21_style_stops(data, naptan_stops_fp):
         # Note: this seems not to be part of the data in TXC 2.1 schema
         # TODO: Remove?
         try:
-            if len(stop) != 1:
+            if len(stop) == 0:
                 # print("Could not find stop_id '%s' from Naptan database. Using coordinates directly from TransXChange." % stop_id)
                 # X and y coordinates - Notice: these might not be available! --> Use NAPTAN database
                 # Spatial reference - TransXChange might use:
