@@ -6,8 +6,8 @@ _module_path = os.path.dirname(__file__)
 _available_files = {"naptan_stops": "Stops.txt",
                     "bank_holidays": "bank-holidays.json",
                     "test_data_dir": "test_data",
-                    "test_tfl_format": ["test_data", "tfl_99-PIC-B-y05-4.xml"],
-                    "test_txc21_format": ["test_data", "tfl_1-HAM-_-y05-2675925.xml"]
+                    "test_tfl_format": ["test_data", "tfl_1-HAM-_-y05-2675925.xml"],
+                    "test_txc21_format": ["test_data", "tfl_99-PIC-B-y05-4.xml"]
                     }
 available = list(_available_files.keys())
 
