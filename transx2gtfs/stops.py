@@ -2,21 +2,84 @@ import os
 import pandas as pd
 import pyproj
 import warnings
+import io
+import urllib
+from zipfile import ZipFile
+import tempfile
 
-def download_naptan_stops(url="http://naptan.app.dft.gov.uk/datarequest/GTFS.ashx", local_path=None):
-    """Download a fresh set of Naptan stop points, or use a locally downloaded NAPTAN stopset csv-file"""
-    if local_path is not None:
-        if os.path.exists(local_path):
-            # Read csv
-            stops = pd.read_csv(local_path, sep='\t')
-            return stops
-        else:
-            raise ValueError("Could not find stop file at:", local_path)
+
+def _update_naptan_data(url="http://naptan.app.dft.gov.uk/DataRequest/Naptan.ashx?format=csv",
+                       filepath=None):
+    if filepath is None:
+        temp_dir = tempfile.gettempdir()
+        target_dir = os.path.join(temp_dir, 'transx2gtfs')
+        target_file = os.path.join(target_dir, "NaPTAN_data.zip")
+
+        if not os.path.exists(target_dir):
+            os.makedirs(target_dir)
+
+        if os.path.exists(target_file):
+            print("Removing old stop data")
+            os.remove(target_file)
     else:
-        NotImplementedError("TODO: Downloading stops from NAPTAN website")
+        target_file = filepath
+
+    # Download the NaPTAN data to temp
+    filepath, msg = urllib.request.urlretrieve(url, target_file)
+    print("Downloaded/updated NaPTAN stop dataset to:\n'{fp}'".format(fp=filepath))
 
 
-def _get_tfl_style_stops(data, naptan_stops_fp):
+def read_naptan_stops(naptan_fp=None):
+    """
+    Reads NaPTAN stops from temp. If the Stops do not exist in the temp, downloads the data.
+    """
+    if naptan_fp is None:
+        naptan_fp = os.path.join(tempfile.gettempdir(),
+                                 'transx2gtfs',
+                                 'NaPTAN_data.zip')
+
+    max_attemps = 20
+    i = 1
+    while True:
+        if not os.path.exists(naptan_fp):
+            _update_naptan_data()
+        else:
+            break
+
+        if i == max_attemps:
+            raise ValueError("Could not update the stops data.\nMax attempts reached.")
+        i += 1
+
+    # Read the stops from the zip
+    z = ZipFile(naptan_fp)
+
+    if 'Stops.csv' not in z.namelist():
+        raise ValueError("NaPTAN dataset did not contain stops!")
+
+    stops = pd.read_csv(io.BytesIO(z.read('Stops.csv')), encoding='latin1',
+                        low_memory=False)
+
+    # Rename required columns into GTFS format
+    stops = stops.rename(columns={
+        'ATCOCode': 'stop_id',
+        'Longitude': 'stop_lon',
+        'Latitude': 'stop_lat',
+        'CommonName': 'stop_name',
+    })
+
+    # Keep only required columns
+    required_cols = ['stop_id', 'stop_lon', 'stop_lat', 'stop_name']
+    for col in required_cols:
+        if col not in stops.columns:
+            raise ValueError(
+                "Required column {col} could not be found from stops DataFrame.".format(
+                col=col)
+            )
+    stops = stops[required_cols].copy()
+    return stops
+
+
+def _get_tfl_style_stops(data):
     """"""
     # Helper projections for transformations
     # Define the projection
@@ -32,7 +95,7 @@ def _get_tfl_style_stops(data, naptan_stops_fp):
     stop_data = pd.DataFrame()
 
     # Get stop database
-    naptan_stops = download_naptan_stops(local_path=naptan_stops_fp)
+    naptan_stops = read_naptan_stops()
 
     # Iterate over stop points
     for p in data.TransXChange.StopPoints.StopPoint:
@@ -87,14 +150,7 @@ def _get_tfl_style_stops(data, naptan_stops_fp):
 
     return stop_data
 
-def _get_txc_21_style_stops(data, naptan_stops_fp):
-    # Helper projections for transformations
-    # Define the projection
-    # The .srs here returns the Proj4-string presentation of the projection
-    wgs84 = pyproj.Proj("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs")
-    osgb36 = pyproj.Proj(
-        "+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.999601 +x_0=400000 +y_0=-100000 +ellps=airy +towgs84=446.448,-125.157,542.060,0.1502,0.2470,0.8421,-20.4894 +units=m +no_defs <>")
-
+def _get_txc_21_style_stops(data):
     # Attributes
     _stop_id_col = 'stop_id'
 
@@ -102,7 +158,7 @@ def _get_txc_21_style_stops(data, naptan_stops_fp):
     stop_data = pd.DataFrame()
 
     # Get stop database
-    naptan_stops = download_naptan_stops(local_path=naptan_stops_fp)
+    naptan_stops = read_naptan_stops()
 
     # Iterate over stop points using TransXchange version 2.1
     for p in data.TransXChange.StopPoints.AnnotatedStopPointRef:
@@ -130,27 +186,19 @@ def _get_txc_21_style_stops(data, naptan_stops_fp):
 
 def get_stops(data, naptan_stops_fp=None):
     """Parse stop data from TransXchange elements"""
-    required_cols = ['stop_id', 'stop_name',
-                     'stop_lat', 'stop_lon']
 
     if 'StopPoint' in data.TransXChange.StopPoints.__dir__():
         stop_data = _get_tfl_style_stops(data, naptan_stops_fp)
     elif 'AnnotatedStopPointRef' in data.TransXChange.StopPoints.__dir__():
         stop_data = _get_txc_21_style_stops(data, naptan_stops_fp)
     else:
-        raise ValueError("Could not parse Stop information from the TransXchange.")
+        raise ValueError(
+            "Did not find tag for Stop data in TransXchange xml. " 
+            "Could not parse Stop information from the TransXchange."
+        )
 
     # Check that stops were found
     if len(stop_data) == 0:
         return None
-
-    # Check that required columns exist
-    for col in required_cols:
-        if col not in stop_data.columns:
-            return None
-
-    # Vehicle type is not needed
-    if 'vehicle_type' in stop_data.columns:
-        stop_data = stop_data.drop('vehicle_type', axis=1)
 
     return stop_data
