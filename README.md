@@ -2,7 +2,7 @@
 [![PyPI version](https://badge.fury.io/py/transx2gtfs.svg)](https://badge.fury.io/py/transx2gtfs) [![build status](https://travis-ci.com/HTenkanen/transx2gtfs.svg?branch=master)](https://travis-ci.com/HTenkanen/transx2gtfs) [![Coverage Status](https://codecov.io/gh/HTenkanen/transx2gtfs/branch/master/graph/badge.svg)](https://codecov.io/gh/HTenkanen/transx2gtfs) [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.3631477.svg)](https://doi.org/10.5281/zenodo.3631477) [![Gitter](https://badges.gitter.im/transx2gtfs/community.svg)](https://gitter.im/transx2gtfs/community?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)
 
 **transx2gtfs** is a library for converting public transport data from [TransXchange](https://www.gov.uk/government/collections/transxchange) -format 
-(data standard in UK) into a widely used [GTFS](https://developers.google.com/transit/gtfs) -format (works globally) that can be used with 
+(data standard in UK) into a widely used [GTFS](https://developers.google.com/transit/gtfs) -format that can be used with 
 various routing engines such as OpenTripPlanner. 
 
 ## Note!
