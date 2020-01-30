@@ -170,10 +170,17 @@ def _get_txc_21_style_stops(data):
         stop = naptan_stops.loc[naptan_stops[_stop_id_col] == stop_id]
 
         if len(stop) == 0:
-            warnings.warn("Did not find a NaPTAN stop for '%s'" % stop_id,
-                          UserWarning,
-                          stacklevel=2)
-            continue
+            # Try first to refresh the Stop data
+            _update_naptan_data()
+            naptan_stops = read_naptan_stops()
+            stop = naptan_stops.loc[naptan_stops[_stop_id_col] == stop_id]
+
+            # If it could still not be found warn and skip
+            if len(stop) == 0:
+                warnings.warn("Did not find a NaPTAN stop for '%s'" % stop_id,
+                              UserWarning,
+                              stacklevel=2)
+                continue
 
         elif len(stop) > 1:
             raise ValueError("Had more than 1 stop with identical stop reference.")
