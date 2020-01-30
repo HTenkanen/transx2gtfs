@@ -2,6 +2,112 @@ import sqlite3
 import pandas as pd
 from zipfile import ZipFile, ZIP_DEFLATED
 import csv
+import glob
+import io
+import os
+import untangle
+
+
+def get_paths_from_zip(zip_filepath):
+    """
+    Extracts TransXchange xml-paths from ZipFile (also nested).
+    """
+    xml_contents = []
+    z = ZipFile(zip_filepath)
+    files_in_zip = z.namelist()
+
+    for name in files_in_zip:
+        if name.endswith('xml'):
+            # Create dictionary with name as key and zip filepath value
+            xml_contents.append({name: z.filename})
+
+        # If the zip contained another zip take it's contents
+        elif name.endswith('.zip'):
+            # Read inner zip to memory
+            inner_zip = ZipFile(io.BytesIO(z.read(name)))
+            # Read files from inner zip
+            for inner_name in inner_zip.namelist():
+                if inner_name.endswith('xml'):
+                    xml_contents.append({z.filename: {name: inner_name}})
+    return xml_contents
+
+
+def get_xml_paths(filepath):
+    """
+    Retrieves XML paths from:
+        - directory +
+        - ZipFiles within a directory +
+        - ZipFiles within a ZipFile
+
+    Finds xml files with all combinations of the above.
+    """
+    # Input is directory
+    # ------------------
+    if os.path.isdir(filepath):
+        # Read all XML and zip files
+        xml_contents = glob.glob(os.path.join(filepath, '*.xml'))
+        zip_contents = glob.glob(os.path.join(filepath, '*.zip'))
+
+        # Parse xml references inside zip files
+        if len(zip_contents) > 0:
+            for zfp in zip_contents:
+                xml_contents += get_paths_from_zip(zfp)
+
+    # Input is a ZipFile
+    elif filepath.endswith('.zip'):
+        xml_contents = get_paths_from_zip(filepath)
+
+    return xml_contents
+
+def read_unpacked_xml(xml_path):
+    """
+    Reads an XML with untangle.
+    """
+    file_size = os.path.getsize(xml_path)
+    parsed_xml = untangle.parse(xml_path)
+    return parsed_xml, file_size, os.path.basename(xml_path)
+
+def read_xml_inside_zip(xml_path):
+    """
+    Reads an XML with untangle which is inside a ZipFile.
+    """
+    zip_filepath = list(xml_path.values())[0]
+    filename = list(xml_path.keys())[0]
+    z = ZipFile(zip_filepath)
+    file_size = z.getinfo(filename).file_size
+    parsed_xml = untangle.parse(
+        io.TextIOWrapper(
+            io.BytesIO(
+                z.read(filename)
+            )
+        )
+    )
+    return parsed_xml, file_size, filename
+
+
+def read_xml_inside_nested_zip(xml_path):
+    """
+    Reads an XML with untangle which is in a ZipFile inside another ZipFile.
+    """
+    zip_filepath = list(xml_path.keys())[0]
+    inner_zip_info = list(xml_path.values())[0]
+    inner_zip_name = list(inner_zip_info.keys())[0]
+    xml_name = list(inner_zip_info.values())[0]
+
+    # Read outer zip
+    z = ZipFile(zip_filepath)
+
+    # Read inner zip to memory
+    inner_zip = ZipFile(io.BytesIO(z.read(inner_zip_name)))
+    file_size = inner_zip.getinfo(xml_name).file_size
+    parsed_xml = untangle.parse(
+        io.TextIOWrapper(
+            io.BytesIO(
+                inner_zip.read(xml_name)
+            )
+        )
+    )
+    return parsed_xml, file_size, xml_name
 
 
 def generate_gtfs_export(gtfs_db_fp):
