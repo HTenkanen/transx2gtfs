@@ -78,7 +78,7 @@ def get_calendar_dates(gtfs_info, bank_holidays_region='england-and-wales'):
     # Check if there exists some exceptions that are not known bank holidays
     for holiday in non_operatives:
         if (holiday not in known_holidays.keys()) and (holiday != 'AllBankHolidays'):
-            warnings.warn("There were also other exceptions than typical BankHolidays:", holiday,
+            warnings.warn("Did not recognize following holiday: %s" % holiday,
                           UserWarning,
                           stacklevel=2)
 
