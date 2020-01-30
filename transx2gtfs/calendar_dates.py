@@ -50,7 +50,11 @@ def get_calendar_dates(gtfs_info):
                       'LateSummerBankHolidayNotScotland': 'Summer bank holiday',
                       'MayDay': 'Early May bank holiday',
                       'GoodFriday': 'Good Friday',
-                      'EasterMonday': 'Easter Monday'}
+                      'EasterMonday': 'Easter Monday',
+                      'BoxingDay': 'Boxing Day',
+                      'ChristmasDay': 'Christmas Day',
+                      'NewYearsDay': 'New Year’s Day',
+                      }
 
     # Get initial info about non-operative days
     gtfs_info = gtfs_info.copy()
