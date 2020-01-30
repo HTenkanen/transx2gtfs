@@ -108,39 +108,55 @@ def _get_tfl_style_stops(data):
         # Get stop info
         stop = naptan_stops.loc[naptan_stops[_stop_id_col] == stop_id]
 
-        # If NAPTAN db does not contain the info, try to parse from the data directly
+        # If local NAPTAN db does not contain the info,
+        # try to refresh local dump or parse from the data directly
 
         if len(stop) == 0:
-            # print("Could not find stop_id '%s' from Naptan database. Using coordinates directly from TransXChange." % stop_id)
-            # X and y coordinates - Notice: these might not be available! --> Use NAPTAN database
-            # Spatial reference - TransXChange might use:
-            #   - OSGB36 (epsg:7405) spatial reference: https://spatialreference.org/ref/epsg/osgb36-british-national-grid-odn-height/
-            #   - WGS84 (epsg:4326)
-            # Detected epsg
-            detected_epsg = None
-            x = float(p.Place.Location.Easting.cdata)
-            y = float(p.Place.Location.Northing.cdata)
+            # Try first to refresh the Stop data
+            # -----------------------------------
+            _update_naptan_data()
+            naptan_stops = read_naptan_stops()
+            stop = naptan_stops.loc[naptan_stops[_stop_id_col] == stop_id]
 
-            # Detect the most probable CRS at the first iteration
-            if detected_epsg is None:
-                # Check if the coordinates are in meters
-                if x > 180:
-                    detected_epsg = 7405
-                else:
-                    detected_epsg = 4326
+            if len(stop) == 0:
+                # If was not found, try to read from TransXchange data directly
+                # -------------------------------------------------------------
+                try:
+                    # X and y coordinates - Notice: these might not be available! --> Use NAPTAN database
+                    # Spatial reference - TransXChange might use:
+                    #   - OSGB36 (epsg:7405) spatial reference: https://spatialreference.org/ref/epsg/osgb36-british-national-grid-odn-height/
+                    #   - WGS84 (epsg:4326)
+                    # Detected epsg
+                    detected_epsg = None
+                    x = float(p.Place.Location.Easting.cdata)
+                    y = float(p.Place.Location.Northing.cdata)
 
-            # Convert point coordinates to WGS84 if they are in OSGB36
-            if detected_epsg == 7405:
-                x, y = pyproj.transform(p1=osgb36, p2=wgs84, x=x, y=y)
+                    # Detect the most probable CRS at the first iteration
+                    if detected_epsg is None:
+                        # Check if the coordinates are in meters
+                        if x > 180:
+                            detected_epsg = 7405
+                        else:
+                            detected_epsg = 4326
 
-            # Create row
-            stop = dict(stop_id=stop_id,
-                        stop_code=None,
-                        stop_name=stop_name,
-                        stop_lat=y,
-                        stop_lon=x,
-                        stop_url=None
-                        )
+                    # Convert point coordinates to WGS84 if they are in OSGB36
+                    if detected_epsg == 7405:
+                        x, y = pyproj.transform(p1=osgb36, p2=wgs84, x=x, y=y)
+
+                    # Create row
+                    stop = dict(stop_id=stop_id,
+                                stop_code=None,
+                                stop_name=stop_name,
+                                stop_lat=y,
+                                stop_lon=x,
+                                stop_url=None
+                                )
+
+                except Exception:
+                    warnings.warn("Did not find a NaPTAN stop for '%s'" % stop_id,
+                                  UserWarning,
+                                  stacklevel=2)
+                    continue
 
         elif len(stop) > 1:
             raise ValueError("Had more than 1 stop with identical stop reference.")
