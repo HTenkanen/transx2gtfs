@@ -14,13 +14,13 @@ help solving them by [raising an issue](https://github.com/HTenkanen/transx2gtfs
 
  - Reads TransXchange xml-files and converts into GTFS feed with all necessary information 
  according the General Transit Feed Specification.
+ - Works and tested against different TransXchange schemas (TfL schema and TXC 2.1)
  - Combines multiple TransXchange files into a single GTFS feed if present in the same folder.
  - Uses multiprocessing to parallelize the conversion process.
  - Parses dates of non-operation (bank holidays etc.) which are written to calendar_dates.txt.
- - Uses NaPTAN stops.  
+ - Uses and updates stop information automatically from NaPTAN website.  
 
 ## Install
-
 
 The package is available at PyPi and you can install it with:
 
