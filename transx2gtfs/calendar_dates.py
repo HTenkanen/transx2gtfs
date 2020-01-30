@@ -33,7 +33,7 @@ def get_calendar_dates_exceptions(vehicle_journey_element):
     except:
         return None
 
-def get_calendar_dates(gtfs_info, bank_holidays_region='england-and-wales'):
+def get_calendar_dates(gtfs_info):
     """
     Parse calendar dates attributes from GTFS info DataFrame.
 
@@ -41,8 +41,7 @@ def get_calendar_dates(gtfs_info, bank_holidays_region='england-and-wales'):
     Hence, Bank holiday information is retrieved from "https://www.gov.uk/" site that should keep the data up-to-date.
     If the file (or internet) is not available, a static version of the same file will be used that is bundled with the package.
 
-    There are different bank holidays in different regions in UK. Hence, you can (and should) define
-    the region with <bank_holidays_region> -parameter.
+    There are different bank holidays in different regions in UK.
     Available regions are: 'england-and-wales', 'scotland', 'northern-ireland'
 
     """
@@ -83,8 +82,8 @@ def get_calendar_dates(gtfs_info, bank_holidays_region='england-and-wales'):
                           stacklevel=2)
 
     if len(non_operatives) > 0:
-        # Get bank holidays that are during the operative period of the feed (returns None if they do not exist)
-        bank_holidays = get_bank_holiday_dates(gtfs_info, bank_holidays_region=bank_holidays_region)
+        # Get bank holidays that are during the operative period of the feed
+        bank_holidays = get_bank_holiday_dates(gtfs_info)
     else:
         return None
 

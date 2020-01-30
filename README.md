@@ -1,8 +1,9 @@
 # transx2gtfs 
 [![PyPI version](https://badge.fury.io/py/transx2gtfs.svg)](https://badge.fury.io/py/transx2gtfs) [![build status](https://travis-ci.com/HTenkanen/transx2gtfs.svg?branch=master)](https://travis-ci.com/HTenkanen/transx2gtfs) [![Coverage Status](https://codecov.io/gh/HTenkanen/transx2gtfs/branch/master/graph/badge.svg)](https://codecov.io/gh/HTenkanen/transx2gtfs) [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.3631477.svg)](https://doi.org/10.5281/zenodo.3631477) [![Gitter](https://badges.gitter.im/transx2gtfs/community.svg)](https://gitter.im/transx2gtfs/community?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)
 
-This is a small library to convert transit data from TransXchange format into GTFS -format that
-can be used with various routing engines such as OpenTripPlanner. 
+**transx2gtfs** is a library for converting public transport data from [TransXchange](https://www.gov.uk/government/collections/transxchange) -format 
+(data standard in UK) into a widely used [GTFS](https://developers.google.com/transit/gtfs) -format (works globally) that can be used with 
+various routing engines such as OpenTripPlanner. 
 
 ## Note!
 
@@ -18,8 +19,24 @@ help solving them by [raising an issue](https://github.com/HTenkanen/transx2gtfs
  - Combines multiple TransXchange files into a single GTFS feed if present in the same folder.
  - Finds and reads all XML files present in ZipFiles, nested ZipFiles and unpacked directories. 
  - Uses multiprocessing to parallelize the conversion process.
- - Parses dates of non-operation (bank holidays etc.) which are written to calendar_dates.txt.
+ - Parses bank holidays (from [gov.uk](https://www.gov.uk/bank-holidays)) affecting transit operations at the given time span of the TransXChange feed, which are written to calendar_dates.txt.
  - Reads and updates stop information automatically from NaPTAN website.  
+ 
+## Why yet another converter?
+
+There are numerous TransXChange to GTFS converters written in different programming languages. 
+However, after testing many of them, it was hard to find a tool that would:
+
+ 1. work in general (without ad-hoc modifications)
+ 2. parse all important information from the TransXChange according GTFS specification.
+ 3. work with different TransXChange schema versions
+ 4. be well maintained
+ 5. be easy to use in all operating systems
+ 6. include appropriate tests (crucial for maintenance).
+ 
+Hence, this Python package was written which aims at meeting the aforementioned requirements. 
+It's not the fastest library out there (written in Python) but multiprocessing gives a bit of boost
+if having a decent computer with multiple cores.
 
 ## Install
 
@@ -29,6 +46,16 @@ The package is available at PyPi and you can install it with:
 
 Library works and is being tested with Python versions 3.6, 3.7 and 3.8.  
 
+If you don't know how to install Python, you can take a look for example [these materials](https://geo-python.github.io/site/course-info/installing-anacondas.html).
+
+### Requirements
+
+transx2gtfs has following dependencies (tested against the latest versions available for Python 3.6, 3.7 and 3.8):
+
+ - untangle
+ - pandas
+ - pyproj
+  
 ## Basic usage
 
 After you have installed the library you can use it in a following manner:
@@ -42,24 +69,25 @@ After you have installed the library you can use it in a following manner:
 
 There are a few parameters that you can adjust:
 
-```python
-convert(input_filepath, output_filepath, append_to_existing=False, worker_cnt=None, file_size_limit=2000)
-    Converts TransXchange formatted schedule data into GTFS feed.
+```
+input_filepath : str
+    File path to data directory or a ZipFile containing one or multiple TransXchange .xml files.
+    Also nested ZipFiles are supported (i.e. a ZipFile with ZipFile(s) containing .xml files.)
 
-    input_filepath : str
-        File path to data directory or a ZipFile containing one or multiple TransXchange .xml files.
-        Also nested ZipFiles are supported (i.e. a ZipFile with ZipFile(s) containing .xml files.)
-    output_filepath : str
-        Full filepath to the output GTFS zip-file, e.g. '/home/myuser/data/my_gtfs.zip'
-    append_to_existing : bool (default is False)
-        Flag for appending to existing gtfs-database. This might be useful if you have
-        TransXchange .xml files distributed into multiple directories (e.g. separate files for
-        train data, tube data and bus data) and you want to merge all those datasets into a single
-        GTFS feed.
-    worker_cnt : int
-        Number of workers to distribute the conversion process. By default the number of CPUs is used.
-    file_size_limit : int
-        File size limit (in megabytes) can be used to skip larger-than-memory XML-files (should not happen).
+output_filepath : str
+    Full filepath to the output GTFS zip-file, e.g. '/home/myuser/data/my_gtfs.zip'
+
+append_to_existing : bool (default is False)
+    Flag for appending to existing gtfs-database. This might be useful if you have
+    TransXchange .xml files distributed into multiple directories (e.g. separate files for
+    train data, tube data and bus data) and you want to merge all those datasets into a single
+    GTFS feed.
+
+worker_cnt : int
+    Number of workers to distribute the conversion process. By default the number of CPUs is used.
+
+file_size_limit : int
+    File size limit (in megabytes) can be used to skip larger-than-memory XML-files (should not happen).
 ```
 
 ## Output
@@ -73,7 +101,7 @@ multimodal routing with your favourite routing engine such as OpenTripPlanner:
 
 If you use this tool for research purposes, we encourage you to cite this work:
 
- - Henrikki Tenkanen. (2020, January 30). HTenkanen/transx2gtfs: v.0.3.5 (Version v0.3.5). Zenodo. http://doi.org/10.5281/zenodo.3631477
+ - Henrikki Tenkanen. (2020). transx2gtfs (Version v0.3.5). Zenodo. http://doi.org/10.5281/zenodo.3631477
 
 ## Developers
 

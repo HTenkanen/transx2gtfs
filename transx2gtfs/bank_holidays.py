@@ -3,15 +3,13 @@ from datetime import datetime
 from urllib.error import HTTPError
 
 
-def get_bank_holiday_dates(gtfs_info, bank_holidays_region='england-and-wales'):
+def get_bank_holiday_dates(gtfs_info):
     """
     Retrieve information about UK bank holidays that are during the feed operative period.
 
     Available regions: 'england-and-wales', 'scotland', 'northern-ireland'
     """
     available_regions = ['england-and-wales', 'scotland', 'northern-ireland']
-    if bank_holidays_region not in available_regions:
-        raise ValueError("You need to use one of the following regions: %s" % available_regions)
 
     # Get bank holidays from UK Gov
     bank_holidays_url = "https://www.gov.uk/bank-holidays.json"
@@ -24,8 +22,19 @@ def get_bank_holiday_dates(gtfs_info, bank_holidays_region='england-and-wales'):
         print("Could not read bank holidays via Internet, using static file instead.")
         bholidays = pd.read_json("data/bank-holidays.json")
 
-    # Get bank holidays for specified region
-    bank_holidays = pd.DataFrame(bholidays.loc['events', bank_holidays_region])
+    # Get bank holidays of all regions
+    bank_holidays = pd.DataFrame()
+    for region in available_regions:
+        region_data = pd.DataFrame(bholidays.loc['events', region])
+        region_data['region'] = region
+        bank_holidays = bank_holidays.append(region_data, ignore_index=True,
+                                             sort=False)
+
+    # Drop duplicates
+    bank_holidays = bank_holidays.drop_duplicates(subset=['date'])
+
+    # Sort
+    bank_holidays = bank_holidays.sort_values(by='date').reset_index(drop=True)
 
     # Make datetime from date and make index
     bank_holidays['dt'] = pd.to_datetime(bank_holidays['date'], infer_datetime_format=True)
