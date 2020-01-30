@@ -7,7 +7,7 @@ can be used with various routing engines such as OpenTripPlanner.
 ## Note!
 
 This package is still in a Beta-phase, so use it at your own risk. 
-Requires more testing. If you find an issue, you can contribute and 
+If you find an issue, you can contribute and 
 help solving them by [raising an issue](https://github.com/HTenkanen/transx2gtfs/issues).
 
 ## Features
