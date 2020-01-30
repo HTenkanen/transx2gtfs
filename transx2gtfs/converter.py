@@ -2,13 +2,6 @@
 """
 Convert transXchange data format to GTFS format.
 
-TODO:
-    - Parallelize the JourneyPattern iteration into multiple threads
-
-See Python reference (not maintained) for conversion from: https://github.com/adamlukemooney/txc2gtfs
-
-This is a Java version: https://github.com/jpf18/TransXChange2GTFS/tree/master/src/transxchange2GoogleTransitHandler
-
 The TransXChange model) has seven basic concepts: Service, Registration, Operator, Route,
 StopPoint, JourneyPattern, and VehicleJourney.
     - A Service brings together the information about a registered bus service, and may contain
@@ -35,21 +28,6 @@ StopPoint, JourneyPattern, and VehicleJourney.
     - A Registration specifies the registration details for a service. It is mandatory in the
         registration schema.
 
-Column Conversion table:
-
-    +------------------------------+-------------+
-    | TransXChange attribute       | GTFS column |
-    +------------------------------+-------------+
-    | JourneyPatternSectionRefs    | trip_id     |
-    +------------------------------+-------------+
-    | VehicleJourneyCode           | service_id  | --> is aggregated to remove duplicate information
-    +------------------------------+-------------+
-    | RouteSectionRef              | route_id    |
-    +------------------------------+-------------+
-    | JourneyPatternRouteReference | route_id    |
-    +------------------------------+-------------+
-
-
 Author
 ------
 Dr. Henrikki Tenkanen, University College London
@@ -58,17 +36,12 @@ License
 -------
 
 MIT.
-
 """
-import untangle
+
 from time import time as timeit
 import sqlite3
-import glob
-from multiprocessing import cpu_count
-import math
 import os
 import multiprocessing
-from transx2gtfs.data import get_path
 from transx2gtfs.stop_times import get_stop_times
 from transx2gtfs.stops import get_stops
 from transx2gtfs.trips import get_trips
@@ -76,52 +49,10 @@ from transx2gtfs.routes import get_routes
 from transx2gtfs.agency import get_agency
 from transx2gtfs.calendar import get_calendar
 from transx2gtfs.calendar_dates import get_calendar_dates
-from transx2gtfs.dataio import generate_gtfs_export, save_to_gtfs_zip
+from transx2gtfs.dataio import generate_gtfs_export, save_to_gtfs_zip, get_xml_paths
+from transx2gtfs.dataio import read_xml_inside_nested_zip, read_xml_inside_zip, read_unpacked_xml
 from transx2gtfs.transxchange import get_gtfs_info
-
-
-class Parallel:
-    def __init__(self, input_files, file_size_limit, gtfs_db):
-        self.input_files = input_files
-        self.file_size_limit = file_size_limit
-        self.gtfs_db = gtfs_db
-
-
-def create_workers(input_files, gtfs_db=None, file_size_limit=1000):
-    """Create workers for multiprocessing"""
-
-    # Distribute the process into all cores
-    core_cnt = cpu_count()
-
-    # File count
-    file_cnt = len(input_files)
-
-    # Batch size
-    batch_size = math.ceil(file_cnt / core_cnt)
-
-    # Create journey workers
-    workers = []
-    start_i = 0
-    end_i = batch_size
-
-    for i in range(0, core_cnt):
-        # On the last iteration ensure that all the rest will be added
-        if i == core_cnt - 1:
-            # Slice the list
-            selection = input_files[start_i:]
-        else:
-            # Slice the list
-            selection = input_files[start_i:end_i]
-
-            print(start_i, end_i)
-
-        workers.append(Parallel(input_files=selection, file_size_limit=file_size_limit,
-                                gtfs_db=gtfs_db))
-
-        # Update indices
-        start_i += batch_size
-        end_i += batch_size
-    return workers
+from transx2gtfs.distribute import create_workers
 
 
 def process_files(parallel):
@@ -130,19 +61,43 @@ def process_files(parallel):
     file_size_limit = parallel.file_size_limit
     gtfs_db = parallel.gtfs_db
 
-    for idx, fp in enumerate(files):
+    for idx, path in enumerate(files):
+
+        # If type is string, it is a direct filepath to XML
+        if isinstance(path, str):
+            data, file_size, xml_name = read_unpacked_xml(path)
+
+        # If the type is dictionary contents are in a zip
+        elif isinstance(path, dict):
+
+            # If the type of value is a string the file can be read directly
+            # from the given Zipfile path, with following structure:
+            # {"transxchange_name.xml" : "/home/data/myzipfile.zip"}
+            if isinstance(list(path.values())[0], str):
+                data, file_size, xml_name = read_xml_inside_zip(path)
+
+
+            # If the type of value is a dictionary the xml-file
+            # is in a ZipFile which is inside another ZipFile.
+            # In such cases, the path stucture is:
+            # {"outermost_zipfile_path.zip": {"inner_zipfile.zip": "transxchange.xml"}}
+            elif isinstance(list(path.values())[0], dict):
+                data, file_size, xml_name = read_xml_inside_nested_zip(path)
+            else:
+                raise ValueError("Something is wrong with the input xml-file paths.")
+        else:
+            raise ValueError("Something is wrong with the input xml-file paths.")
+
         # Filesize
-        size = round((os.path.getsize(fp) / 1000000), 1)
+        size = round((file_size / 1000000), 1)
         if file_size_limit < size:
             continue
 
         print("=================================================================")
-        print("[%s / %s] Processing TransXChange file: %s" % (idx, len(files), os.path.basename(fp)))
+        print("[%s / %s] Processing TransXChange file: %s" % (idx, len(files), xml_name))
         print("Size: %s MB" % size)
         # Log start time
         start_t = timeit()
-
-        data = untangle.parse(fp)
 
         # Parse stops
         stop_data = get_stops(data)
@@ -189,7 +144,7 @@ def process_files(parallel):
         else:
             print(
                 "UserWarning: File %s did not contain valid stop_sequence data, skipping." % (
-                    os.path.basename(fp))
+                    xml_name)
             )
 
         # Close connection
@@ -206,12 +161,14 @@ def process_files(parallel):
         # ===================
 
 
-def convert(data_dir, output_filepath, append_to_existing=False):
+def convert(input_filepath, output_filepath, append_to_existing=False, worker_cnt=None,
+            file_size_limit=2000):
     """
     Converts TransXchange formatted schedule data into GTFS feed.
 
-    data_dir : str
-        Data directory containing one or multiple TransXchange .xml files.
+    input_filepath : str
+        File path to data directory or a ZipFile containing one or multiple TransXchange .xml files.
+        Also nested ZipFiles are supported (i.e. a ZipFile with ZipFile(s) containing .xml files.)
     output_filepath : str
         Full filepath to the output GTFS zip-file, e.g. '/home/myuser/data/my_gtfs.zip'
     append_to_existing : bool (default is False)
@@ -219,6 +176,10 @@ def convert(data_dir, output_filepath, append_to_existing=False):
         TransXchange .xml files distributed into multiple directories (e.g. separate files for
         train data, tube data and bus data) and you want to merge all those datasets into a single
         GTFS feed.
+    worker_cnt : int
+        Number of workers to distribute the conversion process. By default the number of CPUs is used.
+    file_size_limit : int
+        File size limit (in megabytes) can be used to skip larger-than-memory XML-files (should not happen).
     """
     # Total start
     tot_start_t = timeit()
@@ -233,17 +194,14 @@ def convert(data_dir, output_filepath, append_to_existing=False):
             os.remove(gtfs_db)
 
     # Retrieve all TransXChange files
-    files = glob.glob(os.path.join(data_dir, "*.xml"))
+    files = get_xml_paths(input_filepath)
 
     # Iterate over files
     print("Populating database ..")
 
-    # Limit the processed files by file size (in MB)
-    # Files with lower filesize than below will be processed
-    file_size_limit = 1000
-
     # Create workers
-    workers = create_workers(input_files=files, file_size_limit=file_size_limit,
+    workers = create_workers(input_files=files, worker_cnt=worker_cnt,
+                             file_size_limit=file_size_limit,
                              gtfs_db=gtfs_db)
 
     # Create Pool
