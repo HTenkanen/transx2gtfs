@@ -81,14 +81,13 @@ from transx2gtfs.transxchange import get_gtfs_info
 
 
 class Parallel:
-    def __init__(self, input_files, file_size_limit, stops_fp, gtfs_db):
+    def __init__(self, input_files, file_size_limit, gtfs_db):
         self.input_files = input_files
         self.file_size_limit = file_size_limit
-        self.stops_fp = stops_fp
         self.gtfs_db = gtfs_db
 
 
-def create_workers(input_files, stops_fp=None, gtfs_db=None, file_size_limit=1000):
+def create_workers(input_files, gtfs_db=None, file_size_limit=1000):
     """Create workers for multiprocessing"""
 
     # Distribute the process into all cores
@@ -117,7 +116,7 @@ def create_workers(input_files, stops_fp=None, gtfs_db=None, file_size_limit=100
             print(start_i, end_i)
 
         workers.append(Parallel(input_files=selection, file_size_limit=file_size_limit,
-                                stops_fp=stops_fp, gtfs_db=gtfs_db))
+                                gtfs_db=gtfs_db))
 
         # Update indices
         start_i += batch_size
@@ -129,7 +128,6 @@ def process_files(parallel):
     # Get files from input instance
     files = parallel.input_files
     file_size_limit = parallel.file_size_limit
-    naptan_stops_fp = parallel.stops_fp
     gtfs_db = parallel.gtfs_db
 
     for idx, fp in enumerate(files):
@@ -147,7 +145,11 @@ def process_files(parallel):
         data = untangle.parse(fp)
 
         # Parse stops
-        stop_data = get_stops(data, naptan_stops_fp=naptan_stops_fp)
+        stop_data = get_stops(data)
+
+        if stop_data is None:
+            print("Did not found any valid stops. Skipping..")
+            continue
 
         # Parse agency
         agency = get_agency(data)
@@ -230,9 +232,6 @@ def convert(data_dir, output_filepath, append_to_existing=False):
         if os.path.exists(gtfs_db):
             os.remove(gtfs_db)
 
-    # NAPTAN stops
-    naptan_stops_fp = get_path("naptan_stops")
-
     # Retrieve all TransXChange files
     files = glob.glob(os.path.join(data_dir, "*.xml"))
 
@@ -245,7 +244,7 @@ def convert(data_dir, output_filepath, append_to_existing=False):
 
     # Create workers
     workers = create_workers(input_files=files, file_size_limit=file_size_limit,
-                             stops_fp=naptan_stops_fp, gtfs_db=gtfs_db)
+                             gtfs_db=gtfs_db)
 
     # Create Pool
     pool = multiprocessing.Pool()

@@ -1,5 +1,6 @@
 import pandas as pd
 from transx2gtfs.bank_holidays import get_bank_holiday_dates
+import warnings
 
 
 def get_service_calendar_dates_exceptions(data):
@@ -49,7 +50,8 @@ def get_calendar_dates(gtfs_info, bank_holidays_region='england-and-wales'):
     known_holidays = {'SpringBank': 'Spring bank holiday',
                       'LateSummerBankHolidayNotScotland': 'Summer bank holiday',
                       'MayDay': 'Early May bank holiday',
-                      'GoodFriday': 'Good Friday'}
+                      'GoodFriday': 'Good Friday',
+                      'EasterMonday': 'Easter Monday'}
 
     # Get initial info about non-operative days
     gtfs_info = gtfs_info.copy()
@@ -76,7 +78,9 @@ def get_calendar_dates(gtfs_info, bank_holidays_region='england-and-wales'):
     # Check if there exists some exceptions that are not known bank holidays
     for holiday in non_operatives:
         if (holiday not in known_holidays.keys()) and (holiday != 'AllBankHolidays'):
-            raise NotImplementedError("There were also other exceptions than typical BankHolidays:", holiday)
+            warnings.warn("Did not recognize following holiday: %s" % holiday,
+                          UserWarning,
+                          stacklevel=2)
 
     if len(non_operatives) > 0:
         # Get bank holidays that are during the operative period of the feed (returns None if they do not exist)

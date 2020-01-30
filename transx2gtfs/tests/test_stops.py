@@ -11,24 +11,19 @@ def test_txc21_data():
     return get_path('test_txc21_format')
 
 
-@pytest.fixture
-def test_naptan_data():
-    return get_path('naptan_stops')
-
-
-def test_reading_stops_from_txc21(test_txc21_data, test_naptan_data):
+def test_reading_stops_from_txc21(test_txc21_data):
     from transx2gtfs.stops import _get_txc_21_style_stops
     from pandas import DataFrame
     import untangle
 
     data = untangle.parse(test_txc21_data)
-    stops = _get_txc_21_style_stops(data, naptan_stops_fp=test_naptan_data)
+    stops = _get_txc_21_style_stops(data)
 
     # Test type
     assert isinstance(stops, DataFrame)
 
     # Test shape
-    assert stops.shape == (3, 7)
+    assert stops.shape == (3, 4)
 
     # Test that required columns exist
     required_columns = ['stop_id', 'stop_name', 'stop_lat', 'stop_lon']
@@ -40,19 +35,19 @@ def test_reading_stops_from_txc21(test_txc21_data, test_naptan_data):
         assert stops[col].hasnans is False
 
 
-def test_reading_stops_from_tfl(test_tfl_data, test_naptan_data):
+def test_reading_stops_from_tfl(test_tfl_data):
     from transx2gtfs.stops import _get_tfl_style_stops
     from pandas import DataFrame
     import untangle
 
     data = untangle.parse(test_tfl_data)
-    stops = _get_tfl_style_stops(data, naptan_stops_fp=test_naptan_data)
+    stops = _get_tfl_style_stops(data)
 
     # Test type
     assert isinstance(stops, DataFrame)
 
     # Test shape
-    assert stops.shape == (43, 6)
+    assert stops.shape == (43, 4)
 
     # Test that required columns exist
     required_columns = ['stop_id', 'stop_name', 'stop_lat', 'stop_lon']
