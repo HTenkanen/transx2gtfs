@@ -28,10 +28,13 @@ def get_bank_holiday_dates(gtfs_info):
         region_data = pd.DataFrame(bholidays.loc['events', region])
         region_data['region'] = region
         bank_holidays = bank_holidays.append(region_data, ignore_index=True,
-                                           sort=False)
+                                             sort=False)
 
     # Drop duplicates
     bank_holidays = bank_holidays.drop_duplicates(subset=['date'])
+
+    # Sort
+    bank_holidays = bank_holidays.sort_values(by='date').reset_index(drop=True)
 
     # Make datetime from date and make index
     bank_holidays['dt'] = pd.to_datetime(bank_holidays['date'], infer_datetime_format=True)

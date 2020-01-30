@@ -18,7 +18,7 @@ help solving them by [raising an issue](https://github.com/HTenkanen/transx2gtfs
  - Combines multiple TransXchange files into a single GTFS feed if present in the same folder.
  - Finds and reads all XML files present in ZipFiles, nested ZipFiles and unpacked directories. 
  - Uses multiprocessing to parallelize the conversion process.
- - Parses dates of non-operation (bank holidays etc.) which are written to calendar_dates.txt.
+ - Parses bank holidays (from [gov.uk](https://www.gov.uk/bank-holidays)) affecting transit operations at the given time span of the TransXChange feed, which are written to calendar_dates.txt.
  - Reads and updates stop information automatically from NaPTAN website.  
 
 ## Install
