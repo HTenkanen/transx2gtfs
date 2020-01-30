@@ -42,24 +42,25 @@ After you have installed the library you can use it in a following manner:
 
 There are a few parameters that you can adjust:
 
-```python
-convert(input_filepath, output_filepath, append_to_existing=False, worker_cnt=None, file_size_limit=2000)
-    Converts TransXchange formatted schedule data into GTFS feed.
+```
+input_filepath : str
+    File path to data directory or a ZipFile containing one or multiple TransXchange .xml files.
+    Also nested ZipFiles are supported (i.e. a ZipFile with ZipFile(s) containing .xml files.)
 
-    input_filepath : str
-        File path to data directory or a ZipFile containing one or multiple TransXchange .xml files.
-        Also nested ZipFiles are supported (i.e. a ZipFile with ZipFile(s) containing .xml files.)
-    output_filepath : str
-        Full filepath to the output GTFS zip-file, e.g. '/home/myuser/data/my_gtfs.zip'
-    append_to_existing : bool (default is False)
-        Flag for appending to existing gtfs-database. This might be useful if you have
-        TransXchange .xml files distributed into multiple directories (e.g. separate files for
-        train data, tube data and bus data) and you want to merge all those datasets into a single
-        GTFS feed.
-    worker_cnt : int
-        Number of workers to distribute the conversion process. By default the number of CPUs is used.
-    file_size_limit : int
-        File size limit (in megabytes) can be used to skip larger-than-memory XML-files (should not happen).
+output_filepath : str
+    Full filepath to the output GTFS zip-file, e.g. '/home/myuser/data/my_gtfs.zip'
+
+append_to_existing : bool (default is False)
+    Flag for appending to existing gtfs-database. This might be useful if you have
+    TransXchange .xml files distributed into multiple directories (e.g. separate files for
+    train data, tube data and bus data) and you want to merge all those datasets into a single
+    GTFS feed.
+
+worker_cnt : int
+    Number of workers to distribute the conversion process. By default the number of CPUs is used.
+
+file_size_limit : int
+    File size limit (in megabytes) can be used to skip larger-than-memory XML-files (should not happen).
 ```
 
 ## Output
