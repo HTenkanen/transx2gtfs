@@ -74,7 +74,7 @@ multimodal routing with your favourite routing engine such as OpenTripPlanner:
 
 If you use this tool for research purposes, we encourage you to cite this work:
 
- - Henrikki Tenkanen. (2020, January 30). HTenkanen/transx2gtfs: v.0.3.5 (Version v0.3.5). Zenodo. http://doi.org/10.5281/zenodo.3631477
+ - Henrikki Tenkanen. (2020). transx2gtfs (Version v0.3.5). Zenodo. http://doi.org/10.5281/zenodo.3631477
 
 ## Developers
 
