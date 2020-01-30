@@ -184,13 +184,13 @@ def _get_txc_21_style_stops(data):
     return stop_data
 
 
-def get_stops(data, naptan_stops_fp=None):
+def get_stops(data):
     """Parse stop data from TransXchange elements"""
 
     if 'StopPoint' in data.TransXChange.StopPoints.__dir__():
-        stop_data = _get_tfl_style_stops(data, naptan_stops_fp)
+        stop_data = _get_tfl_style_stops(data)
     elif 'AnnotatedStopPointRef' in data.TransXChange.StopPoints.__dir__():
-        stop_data = _get_txc_21_style_stops(data, naptan_stops_fp)
+        stop_data = _get_txc_21_style_stops(data)
     else:
         raise ValueError(
             "Did not find tag for Stop data in TransXchange xml. " 
