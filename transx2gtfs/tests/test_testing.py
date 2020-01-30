@@ -18,11 +18,6 @@ def test_txc21_data():
 
 
 @pytest.fixture
-def test_naptan_data():
-    return get_path('naptan_stops')
-
-
-@pytest.fixture
 def temp_output_filepath():
     import tempfile
     import os
@@ -49,7 +44,3 @@ def test_txc21_data_availability_for_testing(test_txc21_data):
     import os
     assert os.path.isfile(test_txc21_data)
 
-
-def test_naptan_data_availability_for_testing(test_naptan_data):
-    import os
-    assert os.path.isfile(test_naptan_data)
