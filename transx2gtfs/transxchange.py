@@ -369,8 +369,14 @@ def get_service_journey_pattern_info(data):
         # Line name
         line_name = service.Lines.Line.LineName.cdata
 
-        # Service code
-        service_code = service.ServiceCode.cdata
+        try:
+            # Service code
+            service_code = service.ServiceCode.cdata
+        except:
+            service_code=None
+
+        if service_code==None:
+            continue
 
         # Operator reference code
         agency_id = service.RegisteredOperatorRef.cdata
