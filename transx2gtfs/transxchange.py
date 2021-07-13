@@ -356,9 +356,12 @@ def get_service_journey_pattern_info(data):
     service_jp_info = pd.DataFrame()
 
     for service in services:
-
-        # Service description
-        service_description = service.Description.cdata
+        
+        try:
+            # Service description
+            service_description = service.Description.cdata
+        except:
+            service_description = None
 
         # Travel mode
         mode = get_mode(service.Mode.cdata)
