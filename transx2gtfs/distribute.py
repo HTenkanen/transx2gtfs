@@ -14,7 +14,7 @@ def create_workers(input_files, worker_cnt, gtfs_db=None, file_size_limit=1000):
     # Distribute the process into all cores
     if worker_cnt is not None and isinstance(worker_cnt, int):
         core_cnt=worker_cnt
-    if worker_cnt is None:
+    elif worker_cnt is None:
         core_cnt = cpu_count()
     else:
         assert isinstance(worker_cnt, int), "The number of workers should be passed as an integer value."
