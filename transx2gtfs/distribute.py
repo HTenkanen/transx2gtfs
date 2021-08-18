@@ -12,6 +12,8 @@ def create_workers(input_files, worker_cnt, gtfs_db=None, file_size_limit=1000):
     """Create workers for multiprocessing"""
 
     # Distribute the process into all cores
+    if worker_cnt is not None and isinstance(worker_cnt, int):
+        core_cnt=worker_cnt
     if worker_cnt is None:
         core_cnt = cpu_count()
     else:
