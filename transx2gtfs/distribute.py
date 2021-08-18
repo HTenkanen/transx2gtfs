@@ -8,7 +8,7 @@ class Parallel:
         self.gtfs_db = gtfs_db
 
 
-def create_workers(input_files, worker_cnt, gtfs_db=None, file_size_limit=1000):
+def create_workers(input_files, worker_cnt=None, gtfs_db=None, file_size_limit=1000):
     """Create workers for multiprocessing"""
 
     # Distribute the process into all cores
