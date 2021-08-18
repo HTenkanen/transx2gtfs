@@ -356,25 +356,18 @@ def get_service_journey_pattern_info(data):
     service_jp_info = pd.DataFrame()
 
     for service in services:
-        
-        #Service code if there is none skip        
-        if hasattr(service, 'ServiceCode'):
-            service_code = service.ServiceCode.cdata
-        else:
-            continue
 
-        #Service description - some errors filling it out in later transx files
-        if hasattr(service.Description):
-
-            service_description = getattr(service.Description,'cdata', 'No Description')
-        else:
-            service_description = None
+        # Service description
+        service_description = service.Description.cdata
 
         # Travel mode
         mode = get_mode(service.Mode.cdata)
 
         # Line name
         line_name = service.Lines.Line.LineName.cdata
+
+        # Service code
+        service_code = service.ServiceCode.cdata
 
         # Operator reference code
         agency_id = service.RegisteredOperatorRef.cdata
