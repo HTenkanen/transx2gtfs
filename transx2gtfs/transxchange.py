@@ -357,10 +357,17 @@ def get_service_journey_pattern_info(data):
 
     for service in services:
         
-        try:
-            # Service description
-            service_description = service.Description.cdata
-        except:
+        #Service code if there is none skip        
+        if hasattr(service, 'ServiceCode'):
+            service_code = service.ServiceCode.cdata
+        else:
+            continue
+
+        #Service description - some errors filling it out in later transx files
+        if hasattr(service.Description):
+
+            service_description = getattr(service.Description,'cdata', 'No Description')
+        else:
             service_description = None
 
         # Travel mode
@@ -368,15 +375,6 @@ def get_service_journey_pattern_info(data):
 
         # Line name
         line_name = service.Lines.Line.LineName.cdata
-
-        try:
-            # Service code
-            service_code = service.ServiceCode.cdata
-        except:
-            service_code=None
-
-        if service_code==None:
-            continue
 
         # Operator reference code
         agency_id = service.RegisteredOperatorRef.cdata
