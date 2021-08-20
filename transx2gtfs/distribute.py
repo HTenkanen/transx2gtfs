@@ -8,12 +8,17 @@ class Parallel:
         self.gtfs_db = gtfs_db
 
 
-def create_workers(input_files, worker_cnt, gtfs_db=None, file_size_limit=1000):
+def create_workers(input_files, worker_cnt=None, gtfs_db=None, file_size_limit=1000):
     """Create workers for multiprocessing"""
 
     # Distribute the process into all cores
-    if worker_cnt is None:
-        core_cnt = cpu_count()
+    if worker_cnt is not None and isinstance(worker_cnt, int):
+        core_cnt=worker_cnt
+    elif worker_cnt is None:
+        if cpu_count()=1:
+            core_cnt = cpu_count()
+        else:
+            core_cnt = cpu_count()-1
     else:
         assert isinstance(worker_cnt, int), "The number of workers should be passed as an integer value."
 
