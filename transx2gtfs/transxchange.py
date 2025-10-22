@@ -399,7 +399,17 @@ def get_service_journey_pattern_info(data):
             journey_pattern_id = jp.get_attribute('id')
 
             # Section reference
-            section_ref = jp.JourneyPatternSectionRefs.cdata
+            section_refs = jp.JourneyPatternSectionRefs
+            if isinstance(section_refs, list):
+                if section_refs:
+                    section_ref = section_refs[0].cdata  # Use the first reference
+                    if len(section_refs) > 1:
+                        warnings.warn(f"Multiple JourneyPatternSectionRefs found for journey_pattern_id {journey_pattern_id}. Using the first one.")
+                else:
+                    warnings.warn(f"No JourneyPatternSectionRefs found for journey_pattern_id {journey_pattern_id}. Using empty string.")
+                    section_ref = ""
+            else:
+                section_ref = section_refs.cdata if hasattr(section_refs, 'cdata') else ""
 
             # Direction
             direction = get_direction(jp.Direction.cdata)
