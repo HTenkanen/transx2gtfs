@@ -353,6 +353,47 @@ def test_single_stop_elements(no_download):
     assert stop_data["stop_id"].to_list() == ["9300MIL2"]
 
 
+def test_stop_times_advance_by_the_arriving_links_run_time(no_download):
+    """Each stop is reached after the run time of the link arriving at it."""
+    xml = SINGLE_ELEMENT_TXC.replace(
+        """      <JourneyPatternTimingLink id="JPL_1">
+        <From SequenceNumber="1"><StopPointRef>9300WAS1</StopPointRef></From>
+        <To SequenceNumber="2"><StopPointRef>9300MIL2</StopPointRef></To>
+        <RouteLinkRef>RL_1</RouteLinkRef>
+        <RunTime>PT10M</RunTime>
+      </JourneyPatternTimingLink>
+""",
+        """      <JourneyPatternTimingLink id="JPL_1">
+        <From SequenceNumber="1"><StopPointRef>9300WAS1</StopPointRef></From>
+        <To SequenceNumber="2"><StopPointRef>9300MIL2</StopPointRef></To>
+        <RouteLinkRef>RL_1</RouteLinkRef>
+        <RunTime>PT5M</RunTime>
+      </JourneyPatternTimingLink>
+      <JourneyPatternTimingLink id="JPL_2">
+        <From SequenceNumber="2"><StopPointRef>9300MIL2</StopPointRef></From>
+        <To SequenceNumber="3"><StopPointRef>9300MIL1</StopPointRef></To>
+        <RouteLinkRef>RL_2</RouteLinkRef>
+        <RunTime>PT7M</RunTime>
+      </JourneyPatternTimingLink>
+      <JourneyPatternTimingLink id="JPL_3">
+        <From SequenceNumber="3"><StopPointRef>9300MIL1</StopPointRef></From>
+        <To SequenceNumber="4"><StopPointRef>9300WAS1</StopPointRef></To>
+        <RouteLinkRef>RL_3</RouteLinkRef>
+        <RunTime>PT2M</RunTime>
+      </JourneyPatternTimingLink>
+""",
+    )
+    assert "PT7M" in xml
+    stop_times = get_stop_times(get_gtfs_info(read_txc(xml.encode())))
+    assert stop_times["stop_sequence"].to_list() == [1, 2, 3, 4]
+    assert stop_times["arrival_time"].to_list() == [
+        "11:02:00",
+        "11:07:00",
+        "11:14:00",
+        "11:16:00",
+    ]
+
+
 def test_route_without_journeys_is_skipped(no_download):
     xml = SINGLE_ELEMENT_TXC.replace(
         "  </Routes>",

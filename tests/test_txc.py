@@ -184,8 +184,8 @@ def test_multi_section_journey_pattern_is_one_trip():
     assert ab["stop_id"].to_list() == ["S1", "S2", "S3"]
     assert ab["stop_sequence"].to_list() == [1, 2, 3]
     assert ab["timepoint"].to_list() == [1, 0, 0]
-    assert ab["arrival_time"].iloc[0] == "08:00:00"
-    assert ab["arrival_time"].is_monotonic_increasing
+    assert ab["arrival_time"].to_list() == ["08:00:00", "08:05:00", "08:12:00"]
+    assert ab["departure_time"].to_list() == ["08:00:00", "08:05:00", "08:12:00"]
 
     # The single-section pattern sharing the first section keeps the legacy id
     a = stop_times[stop_times["trip_id"] == "JPS_A_MondayToFriday_0800"]
