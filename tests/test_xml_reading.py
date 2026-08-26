@@ -1,11 +1,16 @@
-from untangle import Element
-
 from transx2gtfs.dataio import (
     get_xml_paths,
     read_unpacked_xml,
     read_xml_inside_nested_zip,
     read_xml_inside_zip,
 )
+from transx2gtfs.txc import TxcDocument
+
+
+def _check_document(data):
+    assert isinstance(data, TxcDocument)
+    assert data.schema_version == "2.1"
+    assert len(data.vehicle_journeys) > 0
 
 
 def test_reading_from_unpacked_directory(data_dir):
@@ -17,10 +22,10 @@ def test_reading_from_unpacked_directory(data_dir):
         assert path.endswith(".xml")
 
         data, filesize, name = read_unpacked_xml(path)
-        assert isinstance(data, Element)
-        assert "TransXChange" in data.__dir__()
+        _check_document(data)
         assert filesize > 0
         assert name.endswith(".xml")
+        assert data.file_name == name
 
 
 def test_reading_from_packed(packed_zip):
@@ -35,10 +40,10 @@ def test_reading_from_packed(packed_zip):
         assert zip_path.endswith(".zip")
 
         data, filesize, name = read_xml_inside_zip(path)
-        assert isinstance(data, Element)
+        _check_document(data)
         assert filesize > 0
-        assert "TransXChange" in data.__dir__()
         assert name == xml_name
+        assert data.file_name == name
 
 
 def test_reading_from_nested(nested_zip):
@@ -53,10 +58,10 @@ def test_reading_from_nested(nested_zip):
         assert isinstance(inner, dict)
 
         data, filesize, name = read_xml_inside_nested_zip(path)
-        assert isinstance(data, Element)
+        _check_document(data)
         assert filesize > 0
-        assert "TransXChange" in data.__dir__()
         assert name.endswith(".xml")
+        assert data.file_name == name
 
 
 def test_reading_from_directory_with_zip(dir_with_packed):

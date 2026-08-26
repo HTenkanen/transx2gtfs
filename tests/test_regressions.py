@@ -9,7 +9,6 @@ from urllib.error import URLError
 
 import pandas as pd
 import pytest
-import untangle
 
 import transx2gtfs
 from transx2gtfs import bank_holidays, converter, stops
@@ -33,11 +32,12 @@ from transx2gtfs.stops import (
     read_naptan_stops,
 )
 from transx2gtfs.transxchange import get_gtfs_info, parse_runtime_duration
+from transx2gtfs.txc import read_txc
 from transx2gtfs.trips import get_trips
 
 # A document with exactly one Route, JourneyPatternSection, JourneyPatternTimingLink,
-# Service, JourneyPattern and VehicleJourney (untangle returns a bare Element instead
-# of a list for those); two stops because a trip needs a sequence of stops.
+# Service, JourneyPattern and VehicleJourney (the old DOM reader returned a bare
+# element instead of a list for those); two stops because a trip needs a sequence.
 SINGLE_ELEMENT_TXC = """<?xml version="1.0" encoding="utf-8"?>
 <TransXChange xmlns="http://www.transxchange.org.uk/" SchemaVersion="2.1">
   <StopPoints>
@@ -116,7 +116,8 @@ SINGLE_ELEMENT_TXC = """<?xml version="1.0" encoding="utf-8"?>
 
 LATIN1_XML = (
     b'<?xml version="1.0" encoding="ISO-8859-1"?>\n'
-    b"<TransXChange><Description>Caf\xe9</Description></TransXChange>\n"
+    b'<TransXChange><Operators><Operator id="O"><OperatorNameOnLicence>Caf\xe9'
+    b"</OperatorNameOnLicence></Operator></Operators></TransXChange>\n"
 )
 
 
@@ -149,7 +150,7 @@ def test_zipped_xml_honours_declared_encoding(tmp_path):
     with zipfile.ZipFile(zip_path, "w") as zf:
         zf.writestr("latin1.xml", LATIN1_XML)
     data, size, name = read_xml_inside_zip({"latin1.xml": zip_path})
-    assert data.TransXChange.Description.cdata == "Café"
+    assert data.operators[0].name_on_licence == "Café"
     assert size == len(LATIN1_XML)
     assert name == "latin1.xml"
 
@@ -159,7 +160,7 @@ def test_zipped_xml_honours_declared_encoding(tmp_path):
     data, size, name = read_xml_inside_nested_zip(
         {nested_path: {"packed.zip": "latin1.xml"}}
     )
-    assert data.TransXChange.Description.cdata == "Café"
+    assert data.operators[0].name_on_licence == "Café"
     assert size == len(LATIN1_XML)
     assert name == "latin1.xml"
 
@@ -182,7 +183,7 @@ def test_upper_case_extensions_are_found(tmp_path, ferry_file, packed_zip):
     nested = [p for p in paths if str(tmp_path / "NESTED.ZIP") in p]
     assert nested == [{str(tmp_path / "NESTED.ZIP"): {"INNER.ZIP": "INNER.XML"}}]
     data, size, name = read_xml_inside_nested_zip(nested[0])
-    assert data.TransXChange.Description.cdata == "Café"
+    assert data.operators[0].name_on_licence == "Café"
 
     assert len(get_xml_paths(str(tmp_path / "PACKED.ZIP"))) == 3
 
@@ -239,7 +240,7 @@ def test_convert_without_xml_files_raises(tmp_path):
 
 
 def test_single_element_document(no_download):
-    data = untangle.parse(SINGLE_ELEMENT_TXC)
+    data = read_txc(SINGLE_ELEMENT_TXC.encode())
 
     stop_data = get_stops(data)
     assert list(stop_data["stop_id"]) == ["9300WAS1", "9300MIL2"]
@@ -294,7 +295,7 @@ def test_tfl_stop_coordinates_fall_back_to_the_file(no_download):
 </TransXChange>
 """
     with pytest.warns(UserWarning, match="NO_LOCATION"):
-        stop_data = _get_tfl_style_stops(untangle.parse(xml))
+        stop_data = _get_tfl_style_stops(read_txc(xml.encode()))
 
     assert stop_data["stop_id"].to_list() == ["490007705N", "NOT_IN_NAPTAN"]
     assert stop_data.iloc[0]["stop_name"] == known["stop_name"]
@@ -339,7 +340,7 @@ def test_single_stop_elements(no_download):
         <StopPointRef>9300WAS1</StopPointRef><CommonName>Woolwich</CommonName>
       </AnnotatedStopPointRef>
     </StopPoints></TransXChange>"""
-    stop_data = get_stops(untangle.parse(txc21))
+    stop_data = get_stops(read_txc(txc21.encode()))
     assert stop_data["stop_id"].to_list() == ["9300WAS1"]
 
     tfl = """<TransXChange><StopPoints>
@@ -348,7 +349,7 @@ def test_single_stop_elements(no_download):
         <Descriptor><CommonName>North Greenwich Pier</CommonName></Descriptor>
       </StopPoint>
     </StopPoints></TransXChange>"""
-    stop_data = get_stops(untangle.parse(tfl))
+    stop_data = get_stops(read_txc(tfl.encode()))
     assert stop_data["stop_id"].to_list() == ["9300MIL2"]
 
 
@@ -359,7 +360,7 @@ def test_route_without_journeys_is_skipped(no_download):
         "<Description>Unused</Description><RouteSectionRef>RS_2</RouteSectionRef>"
         "</Route>\n  </Routes>",
     )
-    data = untangle.parse(xml)
+    data = read_txc(xml.encode())
     gtfs_info = get_gtfs_info(data)
     with pytest.warns(UserWarning, match="R_UNUSED"):
         routes = get_routes(gtfs_info, data)
@@ -409,7 +410,7 @@ def test_unknown_txc21_stop_is_skipped_without_download(no_download):
 </TransXChange>
 """
     with pytest.warns(UserWarning, match="NOT_IN_NAPTAN"):
-        stop_data = _get_txc_21_style_stops(untangle.parse(xml))
+        stop_data = _get_txc_21_style_stops(read_txc(xml.encode()))
     assert stop_data["stop_id"].to_list() == ["49001643031"]
 
 
