@@ -1,5 +1,5 @@
 # transx2gtfs 
-[![PyPI version](https://badge.fury.io/py/transx2gtfs.svg)](https://badge.fury.io/py/transx2gtfs) [![Tests](https://github.com/HTenkanen/transx2gtfs/actions/workflows/tests.yaml/badge.svg)](https://github.com/HTenkanen/transx2gtfs/actions/workflows/tests.yaml) [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.3631972.svg)](https://doi.org/10.5281/zenodo.3631972) [![Gitter](https://badges.gitter.im/transx2gtfs/community.svg)](https://gitter.im/transx2gtfs/community?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)
+[![PyPI version](https://badge.fury.io/py/transx2gtfs.svg)](https://badge.fury.io/py/transx2gtfs) [![Tests](https://github.com/HTenkanen/transx2gtfs/actions/workflows/tests.yaml/badge.svg)](https://github.com/HTenkanen/transx2gtfs/actions/workflows/tests.yaml) [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.3628736.svg)](https://doi.org/10.5281/zenodo.3628736) [![Gitter](https://badges.gitter.im/transx2gtfs/community.svg)](https://gitter.im/transx2gtfs/community?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)
 
 **transx2gtfs** is a library for converting public transport data from [TransXchange](https://www.gov.uk/government/collections/transxchange) -format 
 (data standard in UK) into a widely used [GTFS](https://developers.google.com/transit/gtfs) -format that can be used with 
@@ -134,7 +134,7 @@ multimodal routing with your favourite routing engine such as OpenTripPlanner:
 
 If you use this tool for research purposes, we encourage you to cite this work:
 
- - Henrikki Tenkanen. (2020). transx2gtfs (Version v0.4.0). Zenodo. http://doi.org/10.5281/zenodo.3631972
+ - Henrikki Tenkanen. (2026). transx2gtfs (Version v0.5.0). Zenodo. https://doi.org/10.5281/zenodo.22112103
 
 ## Developers
 
