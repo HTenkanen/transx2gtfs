@@ -1,0 +1,11 @@
+name: test
+channels:
+  - conda-forge
+dependencies:
+  - python=3.13
+  - pip
+  - pandas>=2
+  - pyproj>=3
+  - untangle
+  - pytest
+  - pytest-cov

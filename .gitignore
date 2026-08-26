@@ -6,5 +6,10 @@ gtfs.zip
 gtfs_v1.db
 gtfs_v2.db
 NaPTANcsv.zip
-transx2gtfs.egg-info
+*.egg-info
 examples
+__pycache__/
+.pytest_cache/
+.coverage
+# local planning notes
+plans/
