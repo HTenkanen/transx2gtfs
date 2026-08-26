@@ -1,5 +1,5 @@
 # transx2gtfs 
-[![PyPI version](https://badge.fury.io/py/transx2gtfs.svg)](https://badge.fury.io/py/transx2gtfs) [![build status](https://travis-ci.com/HTenkanen/transx2gtfs.svg?branch=master)](https://travis-ci.com/HTenkanen/transx2gtfs) [![Coverage Status](https://codecov.io/gh/HTenkanen/transx2gtfs/branch/master/graph/badge.svg)](https://codecov.io/gh/HTenkanen/transx2gtfs) [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.3631972.svg)](https://doi.org/10.5281/zenodo.3631972) [![Gitter](https://badges.gitter.im/transx2gtfs/community.svg)](https://gitter.im/transx2gtfs/community?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)
+[![PyPI version](https://badge.fury.io/py/transx2gtfs.svg)](https://badge.fury.io/py/transx2gtfs) [![Tests](https://github.com/HTenkanen/transx2gtfs/actions/workflows/tests.yaml/badge.svg)](https://github.com/HTenkanen/transx2gtfs/actions/workflows/tests.yaml) [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.3631972.svg)](https://doi.org/10.5281/zenodo.3631972) [![Gitter](https://badges.gitter.im/transx2gtfs/community.svg)](https://gitter.im/transx2gtfs/community?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)
 
 **transx2gtfs** is a library for converting public transport data from [TransXchange](https://www.gov.uk/government/collections/transxchange) -format 
 (data standard in UK) into a widely used [GTFS](https://developers.google.com/transit/gtfs) -format that can be used with 
@@ -20,7 +20,7 @@ help solving them by [raising an issue](https://github.com/HTenkanen/transx2gtfs
  - Finds and reads all XML files present in ZipFiles, nested ZipFiles and unpacked directories. 
  - Uses multiprocessing to parallelize the conversion process.
  - Parses bank holidays (from [gov.uk](https://www.gov.uk/bank-holidays)) affecting transit operations at the given time span of the TransXChange feed, which are written to calendar_dates.txt.
- - Reads and updates stop information automatically from NaPTAN website.  
+ - Reads stop information automatically from the [NaPTAN](https://www.gov.uk/government/publications/national-public-transport-access-node-schema) API (or from a local NaPTAN CSV file).
  
 ## Why yet another converter?
 
@@ -40,22 +40,22 @@ if having a decent computer with multiple cores.
 
 ## Install
 
-The package is available at PyPi and you can install it with:
+The package is available at PyPI and you can install it with:
 
 `$ pip install transx2gtfs`
 
-Library works and is being tested with Python versions 3.6, 3.7 and 3.8.  
+transx2gtfs requires Python 3.10 or newer and is tested on Python 3.10–3.14 on Linux, macOS and Windows.
 
 If you don't know how to install Python, you can take a look for example [these materials](https://geo-python.github.io/site/course-info/installing-anacondas.html).
 
 ### Requirements
 
-transx2gtfs has following dependencies (tested against the latest versions available for Python 3.6, 3.7 and 3.8):
+transx2gtfs depends on:
 
+ - pandas (>= 2.0)
+ - pyproj (>= 3.0)
  - untangle
- - pandas
- - pyproj
-  
+
 ## Basic usage
 
 After you have installed the library you can use it in a following manner:
@@ -84,11 +84,44 @@ append_to_existing : bool (default is False)
     GTFS feed.
 
 worker_cnt : int
-    Number of workers to distribute the conversion process. By default the number of CPUs is used.
+    Number of worker processes. By default the number of CPUs minus one is used.
 
 file_size_limit : int
     File size limit (in megabytes) can be used to skip larger-than-memory XML-files (should not happen).
 ```
+
+The conversion runs in worker processes. On macOS and Windows those are started with
+the `spawn` method, so when you call `convert()` from a script, put the call under an
+`if __name__ == "__main__":` guard:
+
+```python
+import transx2gtfs
+
+if __name__ == "__main__":
+    transx2gtfs.convert("data/my_transxchange_files", "data/my_converted_gtfs.zip")
+```
+
+### Command line
+
+The same conversion is available from the command line (`transx2gtfs` or `python -m transx2gtfs`):
+
+```
+$ transx2gtfs data/my_transxchange_files data/my_converted_gtfs.zip
+$ transx2gtfs --help
+```
+
+Options: `--append` (append to the intermediate database of a previous run), `--workers N`,
+`--file-size-limit MB` and `--version`.
+
+### Stop and bank holiday data
+
+Stop coordinates are read from the national NaPTAN dataset, which is downloaded once
+(about 100 MB) into the system temp directory and reused on later runs. To use a local copy
+instead (for example when working offline), point `TRANSX2GTFS_NAPTAN_PATH` at a NaPTAN CSV
+file downloaded from https://naptan.api.dft.gov.uk/v1/access-nodes?dataFormat=csv.
+Bank holidays are read from [gov.uk](https://www.gov.uk/bank-holidays.json), falling back to a
+copy bundled with the package; `TRANSX2GTFS_BANK_HOLIDAYS_PATH` can point at a local copy of
+that JSON file.
 
 ## Output
 
@@ -105,4 +138,17 @@ If you use this tool for research purposes, we encourage you to cite this work:
 
 ## Developers
 
-- Henrikki Tenkanen, University College London
+- Henrikki Tenkanen, Aalto University
+
+### Development setup
+
+```
+$ git clone https://github.com/HTenkanen/transx2gtfs.git
+$ cd transx2gtfs
+$ pip install -e .[test]
+$ pytest
+```
+
+The tests run offline: stops come from a small NaPTAN subset in `tests/data/` and bank
+holidays from the bundled file. Code is formatted with `black` and checked with `flake8`
+(`pre-commit install` sets up both as git hooks).
