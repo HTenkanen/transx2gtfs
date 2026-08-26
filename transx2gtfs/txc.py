@@ -16,8 +16,10 @@ from lxml import etree
 # Elements (directly below their container) that become one record each
 _RECORD_TAGS = (
     "Operator",
+    "LicensedOperator",
     "StopPoint",
     "AnnotatedStopPointRef",
+    "RouteSection",
     "Route",
     "JourneyPatternSection",
     "Service",
@@ -29,9 +31,11 @@ _RECORD_TAGS = (
 class Operator:
     id: str
     code: str = None
+    national_operator_code: str = None
     short_name: str = None
     name_on_licence: str = None
     trading_name: str = None
+    licence_number: str = None
 
 
 @dataclass(slots=True)
@@ -65,7 +69,8 @@ class TimingLink:
     to_timing_status: str = None
     route_link_ref: str = None
     run_time: str = None
-    wait_time: str = None
+    from_wait_time: str = None
+    to_wait_time: str = None
 
 
 @dataclass(slots=True)
@@ -127,20 +132,33 @@ class VehicleJourney:
     operating_profile: OperatingProfile = None
     vehicle_type_code: str = None
     vehicle_type_description: str = None
+    notes: list = field(default_factory=list)
 
 
 @dataclass(slots=True)
 class TxcDocument:
     file_name: str = None
     schema_version: str = None
+    creation_date_time: str = None
+    modification_date_time: str = None
     operators: list = field(default_factory=list)
     stop_points: list = field(default_factory=list)
+    # RouteLink id -> Distance text, for links that declare a distance
+    route_link_distances: dict = field(default_factory=dict)
+    # RouteLink id -> id of the RouteSection containing it
+    route_link_sections: dict = field(default_factory=dict)
     routes: list = field(default_factory=list)
     journey_pattern_sections: list = field(default_factory=list)
     services: list = field(default_factory=list)
     vehicle_journeys: list = field(default_factory=list)
     # "StopPoint" (coordinates in the file) or "AnnotatedStopPointRef" (refs only)
     stop_point_style: str = None
+
+    def operator(self, operator_id):
+        for operator in self.operators:
+            if operator.id == operator_id:
+                return operator
+        raise KeyError("Operator '%s' not found" % operator_id)
 
     def journey_pattern_section(self, section_id):
         for section in self.journey_pattern_sections:
@@ -229,9 +247,11 @@ def _operator(elem):
     return Operator(
         id=elem.get("id"),
         code=_text(elem, "OperatorCode"),
+        national_operator_code=_text(elem, "NationalOperatorCode"),
         short_name=_text(elem, "OperatorShortName"),
         name_on_licence=_text(elem, "OperatorNameOnLicence"),
         trading_name=_text(elem, "TradingName"),
+        licence_number=_text(elem, "LicenceNumber"),
     )
 
 
@@ -285,7 +305,8 @@ def _timing_link(elem):
         to_timing_status=_text(to_elem, "TimingStatus"),
         route_link_ref=_text(elem, "RouteLinkRef"),
         run_time=_required_text(elem, "RunTime"),
-        wait_time=_text(elem, "WaitTime"),
+        from_wait_time=_text(from_elem, "WaitTime"),
+        to_wait_time=_text(to_elem, "WaitTime"),
     )
 
 
@@ -303,8 +324,11 @@ def _journey_pattern(elem):
         id=elem.get("id"),
         direction=_text(elem, "Direction"),
         route_ref=_text(elem, "RouteRef"),
+        # IDREFS: one element may list several ids separated by whitespace
         section_refs=[
-            r.text or "" for r in _children(elem, "JourneyPatternSectionRefs")
+            ref
+            for r in _children(elem, "JourneyPatternSectionRefs")
+            for ref in (r.text or "").split()
         ],
         vehicle_type_code=_text(elem, "Operational", "VehicleType", "VehicleTypeCode"),
         vehicle_type_description=_text(
@@ -341,6 +365,14 @@ def _service(elem):
     )
 
 
+def _note_text(note):
+    """Text of a Note: its NoteText child (2.4), else its own text"""
+    text = _text(note, "NoteText")
+    if text is None:
+        text = note.text or ""
+    return text.strip()
+
+
 def _vehicle_journey(elem):
     return VehicleJourney(
         code=_required_text(elem, "VehicleJourneyCode"),
@@ -356,11 +388,12 @@ def _vehicle_journey(elem):
         vehicle_type_description=_text(
             elem, "Operational", "VehicleType", "Description"
         ),
+        notes=[_note_text(note) for note in _children(elem, "Note")],
     )
 
 
 def _add_record(doc, name, elem):
-    if name == "Operator":
+    if name in ("Operator", "LicensedOperator"):
         doc.operators.append(_operator(elem))
     elif name == "StopPoint":
         doc.stop_points.append(_stop_point(elem))
@@ -415,6 +448,10 @@ def read_txc(source, file_name=None):
     # largest single record.
     depth = 0
     in_record = False
+    # A RouteSection can carry track geometry for thousands of links, so its
+    # RouteLinks are handled one at a time instead of with the whole section
+    in_route_section = False
+    route_section_id = None
     # Entities are never needed in TransXChange; not resolving them rules out
     # external-entity file access and entity-expansion blow-ups
     for event, elem in etree.iterparse(
@@ -424,17 +461,30 @@ def read_txc(source, file_name=None):
             depth += 1
             if depth == 1:
                 doc.schema_version = elem.get("SchemaVersion")
+                doc.creation_date_time = elem.get("CreationDateTime")
+                doc.modification_date_time = elem.get("ModificationDateTime")
             elif depth == 3:
-                in_record = (
-                    isinstance(elem.tag, str) and _local(elem.tag) in _RECORD_TAGS
-                )
+                name = _local(elem.tag) if isinstance(elem.tag, str) else None
+                in_record = name in _RECORD_TAGS
+                in_route_section = name == "RouteSection"
+                route_section_id = elem.get("id") if in_route_section else None
             continue
         depth -= 1
         if depth == 2:
-            if in_record:
+            if in_record and not in_route_section:
                 _add_record(doc, _local(elem.tag), elem)
             _release(elem)
             in_record = False
+            in_route_section = False
+        elif depth == 3 and in_route_section:
+            if isinstance(elem.tag, str) and _local(elem.tag) == "RouteLink":
+                link_id = elem.get("id")
+                if link_id is not None:
+                    doc.route_link_sections[link_id] = route_section_id
+                    distance = _text(elem, "Distance")
+                    if distance is not None:
+                        doc.route_link_distances[link_id] = distance
+            _release(elem)
         elif depth > 2 and not in_record:
             _release(elem)
     return doc

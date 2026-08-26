@@ -293,3 +293,91 @@ def test_parsing_memory_is_bounded_by_the_model(tmp_path, filler):
     assert (stop_count, journey_count) == (3, 2)
     # A retained tree costs several times the file size; streaming costs a fraction
     assert rss_increase < file_size, (rss_increase, file_size)
+
+
+def test_operator_fields_and_licensed_operators():
+    xml = minimal(
+        operator_names="<OperatorNameOnLicence>X Ltd</OperatorNameOnLicence>"
+        "<NationalOperatorCode>XNOC</NationalOperatorCode>"
+        "<LicenceNumber>PB0001</LicenceNumber>"
+    ).replace(
+        b"</Operators>",
+        b'<LicensedOperator id="OId_Y"><OperatorCode>Y</OperatorCode></LicensedOperator>'
+        b"</Operators>",
+    )
+    doc = read_txc(xml)
+    assert [o.id for o in doc.operators] == ["OId_X", "OId_Y"]
+    first = doc.operator("OId_X")
+    assert (first.national_operator_code, first.licence_number) == ("XNOC", "PB0001")
+    assert doc.operator("OId_Y").code == "Y"
+    with pytest.raises(KeyError):
+        doc.operator("OId_Z")
+
+
+def test_root_dates_and_wait_times():
+    xml = (
+        minimal()
+        .replace(
+            b'SchemaVersion="2.1"',
+            b'SchemaVersion="2.1" CreationDateTime="2027-01-01T00:00:00"',
+        )
+        .replace(
+            b'<From SequenceNumber="1"><StopPointRef>S1</StopPointRef></From>',
+            b'<From SequenceNumber="1"><StopPointRef>S1</StopPointRef>'
+            b"<WaitTime>PT1M</WaitTime></From>",
+        )
+        .replace(
+            b'<To SequenceNumber="2"><StopPointRef>S2</StopPointRef></To>',
+            b'<To SequenceNumber="2"><StopPointRef>S2</StopPointRef>'
+            b"<WaitTime>PT2M</WaitTime></To>",
+        )
+    )
+    doc = read_txc(xml)
+    assert doc.creation_date_time == "2027-01-01T00:00:00"
+    assert doc.modification_date_time is None
+    link = doc.journey_pattern_section("JPS_A").timing_links[0]
+    assert (link.from_wait_time, link.to_wait_time) == ("PT1M", "PT2M")
+    other = doc.journey_pattern_section("JPS_B").timing_links[0]
+    assert (other.from_wait_time, other.to_wait_time) == (None, None)
+
+
+def test_section_refs_may_be_whitespace_separated_idrefs():
+    xml = minimal().replace(
+        b"<JourneyPatternSectionRefs>JPS_A</JourneyPatternSectionRefs>"
+        b"<JourneyPatternSectionRefs>JPS_B</JourneyPatternSectionRefs>",
+        b"<JourneyPatternSectionRefs>JPS_A JPS_B</JourneyPatternSectionRefs>",
+    )
+    assert read_txc(xml).journey_pattern("JP_AB").section_refs == ["JPS_A", "JPS_B"]
+
+
+def test_notes_in_both_forms():
+    notes = (
+        b"<Note><NoteCode>1</NoteCode><NoteText>Bookable in advance</NoteText></Note>"
+        b"<Note> Direct text </Note>"
+    )
+    xml = minimal().replace(
+        b"<DepartureTime>08:00:00</DepartureTime>",
+        b"<DepartureTime>08:00:00</DepartureTime>" + notes,
+        1,
+    )
+    doc = read_txc(xml)
+    assert doc.vehicle_journeys[0].notes == ["Bookable in advance", "Direct text"]
+    assert doc.vehicle_journeys[1].notes == []
+
+
+def test_route_link_distances_and_sections_are_collected():
+    sections = (
+        '<RouteSection id="RS_1"><RouteLink id="RL_1"><Distance>1000</Distance></RouteLink>'
+        '<RouteLink id="RL_2"></RouteLink></RouteSection>'
+        '<RouteSection id="RS_2"><RouteLink id="RL_3"><Distance>250</Distance>'
+        "<Track><Mapping><Location><Longitude>0</Longitude></Location></Mapping></Track>"
+        "</RouteLink></RouteSection>"
+    )
+    doc = read_txc(
+        minimal().replace(
+            b"<RouteSections></RouteSections>",
+            ("<RouteSections>%s</RouteSections>" % sections).encode(),
+        )
+    )
+    assert doc.route_link_distances == {"RL_1": "1000", "RL_3": "250"}
+    assert doc.route_link_sections == {"RL_1": "RS_1", "RL_2": "RS_1", "RL_3": "RS_2"}
