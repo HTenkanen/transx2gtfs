@@ -1,4 +1,4 @@
 service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date
 PF0000804:24_20260901_20270901_Monday|Tuesday|Wednesday|Thursday|Friday_a3c620de,1,1,1,1,1,0,0,20260901,20270901
 PF0000804:24_20260901_20270901_Monday|Tuesday|Wednesday|Thursday_5b808787,1,1,1,1,0,0,0,20260901,20270901
-PF0000804:24_20260904_20270901_Friday_4350a14b,0,0,0,0,1,0,0,20260904,20270901
+PF0000804:24_20260904_20270716_Friday_b3e22537,0,0,0,0,1,0,0,20260904,20270716
