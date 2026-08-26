@@ -381,3 +381,177 @@ def test_route_link_distances_and_sections_are_collected():
     )
     assert doc.route_link_distances == {"RL_1": "1000", "RL_3": "250"}
     assert doc.route_link_sections == {"RL_1": "RS_1", "RL_2": "RS_1", "RL_3": "RS_2"}
+
+
+FULL_PROFILE = (
+    b"<OperatingProfile>"
+    b"<RegularDayType><HolidaysOnly /></RegularDayType>"
+    b"<SpecialDaysOperation>"
+    b"<DaysOfOperation>"
+    b"<DateRange><StartDate>2020-06-01</StartDate><EndDate>2020-06-05</EndDate>"
+    b"</DateRange>"
+    b"<DateRange><StartDate>2020-07-01</StartDate></DateRange>"
+    b"</DaysOfOperation>"
+    b"<DaysOfNonOperation>"
+    b"<DateRange><StartDate>2020-08-10</StartDate><EndDate>2020-08-12</EndDate>"
+    b"</DateRange>"
+    b"</DaysOfNonOperation>"
+    b"</SpecialDaysOperation>"
+    b"<ServicedOrganisationDayType>"
+    b"<DaysOfOperation>"
+    b"<WorkingDays><ServicedOrganisationRef>ORG1</ServicedOrganisationRef>"
+    b"</WorkingDays>"
+    b"<Holidays><ServicedOrganisationRef>ORG2</ServicedOrganisationRef></Holidays>"
+    b"</DaysOfOperation>"
+    b"<DaysOfNonOperation>"
+    b"<WorkingDays><ServicedOrganisationRef>ORG2</ServicedOrganisationRef>"
+    b"</WorkingDays>"
+    b"</DaysOfNonOperation>"
+    b"</ServicedOrganisationDayType>"
+    b"<BankHolidayOperation>"
+    b"<DaysOfOperation><ChristmasDay />"
+    b"<OtherPublicHoliday><Description>Fair</Description><Date>2020-09-01</Date>"
+    b"</OtherPublicHoliday>"
+    b"</DaysOfOperation>"
+    b"<DaysOfNonOperation><GoodFriday /><EasterMonday />"
+    b"<OtherPublicHoliday><Description>Gala</Description><Date>2020-10-01</Date>"
+    b"</OtherPublicHoliday>"
+    b"</DaysOfNonOperation>"
+    b"</BankHolidayOperation>"
+    b"</OperatingProfile>"
+)
+
+SERVICE_PROFILE = (
+    b"<OperatingProfile><RegularDayType><DaysOfWeek><MondayToFriday /></DaysOfWeek>\n"
+    b"      </RegularDayType></OperatingProfile>"
+)
+
+
+def test_operating_profile_reads_every_day_type():
+    xml = minimal().replace(SERVICE_PROFILE, FULL_PROFILE)
+    profile = read_txc(xml).services[0].operating_profile
+    assert profile.days_of_week is None
+    assert profile.holidays_only is True
+    assert profile.bank_holiday_days_of_operation == ["ChristmasDay"]
+    assert profile.bank_holiday_days_of_non_operation == ["GoodFriday", "EasterMonday"]
+    assert profile.other_public_holidays_of_operation == [("Fair", "2020-09-01")]
+    assert profile.other_public_holidays_of_non_operation == [("Gala", "2020-10-01")]
+    assert profile.special_days_of_operation == [
+        ("2020-06-01", "2020-06-05"),
+        ("2020-07-01", "2020-07-01"),
+    ]
+    assert profile.special_days_of_non_operation == [("2020-08-10", "2020-08-12")]
+    assert profile.serviced_organisation_days_of_operation == [
+        ("ORG1", "WorkingDays"),
+        ("ORG2", "Holidays"),
+    ]
+    assert profile.serviced_organisation_days_of_non_operation == [
+        ("ORG2", "WorkingDays")
+    ]
+
+    plain = read_txc(minimal()).services[0].operating_profile
+    assert plain.holidays_only is False
+    assert plain.bank_holiday_days_of_operation is None
+    assert plain.other_public_holidays_of_operation == []
+    assert plain.special_days_of_operation == []
+    assert plain.serviced_organisation_days_of_non_operation == []
+
+
+def test_serviced_organisations_are_read():
+    organisations = (
+        b"<ServicedOrganisations>"
+        b"<ServicedOrganisation><OrganisationCode>ORG1</OrganisationCode>"
+        b"<Name>School</Name>"
+        b"<WorkingDays>"
+        b"<DateRange><StartDate>2020-01-06</StartDate><EndDate>2020-02-14</EndDate>"
+        b"</DateRange>"
+        b"<DateRange><StartDate>2020-02-24</StartDate><EndDate>2020-04-03</EndDate>"
+        b"</DateRange>"
+        b"</WorkingDays>"
+        b"<Holidays>"
+        b"<DateRange><StartDate>2020-02-17</StartDate><EndDate>2020-02-21</EndDate>"
+        b"</DateRange>"
+        b"</Holidays>"
+        b"</ServicedOrganisation>"
+        b"<ServicedOrganisation><OrganisationCode>ORG2</OrganisationCode>"
+        b"</ServicedOrganisation>"
+        b"</ServicedOrganisations>"
+        b"<Services>"
+    )
+    doc = read_txc(minimal().replace(b"<Services>", organisations))
+    assert [o.code for o in doc.serviced_organisations] == ["ORG1", "ORG2"]
+    school = doc.serviced_organisation("ORG1")
+    assert school.name == "School"
+    assert school.working_days == [
+        ("2020-01-06", "2020-02-14"),
+        ("2020-02-24", "2020-04-03"),
+    ]
+    assert school.holidays == [("2020-02-17", "2020-02-21")]
+    other = doc.serviced_organisation("ORG2")
+    assert (other.name, other.working_days, other.holidays) == (None, [], [])
+    with pytest.raises(KeyError):
+        doc.serviced_organisation("ORG9")
+    assert read_txc(minimal()).serviced_organisations == []
+
+
+VJ_A_TAIL = b"<JourneyPatternRef>JP_A</JourneyPatternRef>\n"
+
+
+def test_vehicle_journey_reference_frequency_and_overrides():
+    extra = (
+        b"<VehicleJourneyRef>VJ_AB</VehicleJourneyRef>"
+        b"<OperatorRef>OId_X</OperatorRef>"
+        b"<Frequency><EndTime>10:00:00</EndTime>"
+        b"<Interval><ScheduledFrequency>PT10M</ScheduledFrequency></Interval>"
+        b"</Frequency>"
+        b"<VehicleJourneyTimingLink>"
+        b"<JourneyPatternTimingLinkRef>L_A</JourneyPatternTimingLinkRef>"
+        b"<RunTime>PT6M</RunTime>"
+        b"<From><WaitTime>PT1M</WaitTime></From>"
+        b"<To><WaitTime>PT2M</WaitTime></To>"
+        b"</VehicleJourneyTimingLink>"
+        b"<VehicleJourneyTimingLink>"
+        b"<JourneyPatternTimingLinkRef>L_B</JourneyPatternTimingLinkRef>"
+        b"</VehicleJourneyTimingLink>"
+    )
+    doc = read_txc(minimal().replace(VJ_A_TAIL, VJ_A_TAIL + extra))
+    journey = doc.vehicle_journey("VJ_A")
+    assert journey.vehicle_journey_ref == "VJ_AB"
+    assert journey.operator_ref == "OId_X"
+    assert (journey.frequency.end_time, journey.frequency.interval) == (
+        "10:00:00",
+        "PT10M",
+    )
+    first, second = journey.timing_links
+    assert first.journey_pattern_timing_link_ref == "L_A"
+    assert (first.run_time, first.from_wait_time, first.to_wait_time) == (
+        "PT6M",
+        "PT1M",
+        "PT2M",
+    )
+    assert second.journey_pattern_timing_link_ref == "L_B"
+    assert (second.run_time, second.from_wait_time, second.to_wait_time) == (
+        None,
+        None,
+        None,
+    )
+
+    plain = doc.vehicle_journey("VJ_AB")
+    assert (plain.vehicle_journey_ref, plain.operator_ref) == (None, None)
+    assert (plain.frequency, plain.timing_links) == (None, [])
+    with pytest.raises(KeyError):
+        doc.vehicle_journey("VJ_9")
+
+
+def test_departure_time_is_optional_only_with_a_journey_reference():
+    departure = b"<DepartureTime>08:00:00</DepartureTime>"
+    without = minimal().replace(
+        VJ_A_TAIL + b"      " + departure, VJ_A_TAIL + b"      "
+    )
+    assert without != minimal()
+    with pytest.raises(ValueError, match="missing required element DepartureTime"):
+        read_txc(without)
+
+    ref = b"<VehicleJourneyRef>VJ_AB</VehicleJourneyRef>"
+    doc = read_txc(without.replace(VJ_A_TAIL, VJ_A_TAIL + ref))
+    assert doc.vehicle_journey("VJ_A").departure_time is None
