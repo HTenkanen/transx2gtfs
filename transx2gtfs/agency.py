@@ -18,10 +18,10 @@ def get_agency_url(operator_code):
 
 
 def get_agency_name(operator):
-    """Operator name: on licence, else trading name, short name or code"""
+    """Operator name: trading name, else name on licence, short name or code"""
     name = (
-        operator.name_on_licence
-        or operator.trading_name
+        operator.trading_name
+        or operator.name_on_licence
         or operator.short_name
         or operator.code
     )

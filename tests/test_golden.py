@@ -19,23 +19,38 @@ from transx2gtfs.transxchange import get_gtfs_info
 from transx2gtfs.trips import get_trips
 from transx2gtfs.txc import read_txc
 
-from conftest import DATA_DIR, UNPACKED_DIR
+from conftest import DATA_DIR, UNPACKED_DIR, txc24_fixture
 
+TXC24 = {
+    "SVRABAO001": "SVRABAO001.xml",
+    "FWC001_FWAY_150": "FWC001_FWAY_150_PF000080424_20260901_20260714_210137.xml",
+    "HRCS2_HRCS_240": "HRCS2_HRCS_240_PK20556564_20260831_20260730_114905.xml",
+    "LGEN_403": "LGEN_403_LGENPK000181698403_20251025_-_2197827.xml",
+}
 FIXTURES = {
     "tfl_1-HAM-_-y05-2675925": UNPACKED_DIR / "tfl_1-HAM-_-y05-2675925.xml",
     "tfl_33-RB5-_-y05-7": UNPACKED_DIR / "tfl_33-RB5-_-y05-7.xml",
     "tfl_99-PIC-B-y05-4": UNPACKED_DIR / "tfl_99-PIC-B-y05-4.xml",
-    "SVRABAO001": DATA_DIR / "txc24" / "SVRABAO001.xml",
-    "FWC001_FWAY_150": DATA_DIR
-    / "txc24"
-    / "FWC001_FWAY_150_PF000080424_20260901_20260714_210137.xml",
-    "HRCS2_HRCS_240": DATA_DIR
-    / "txc24"
-    / "HRCS2_HRCS_240_PK20556564_20260831_20260730_114905.xml",
-    "LGEN_403": DATA_DIR
-    / "txc24"
-    / "LGEN_403_LGENPK000181698403_20251025_-_2197827.xml",
+    **TXC24,
 }
+
+
+def read_fixture(name):
+    source = FIXTURES[name]
+    if name in TXC24:
+        return read_txc(txc24_fixture(source), file_name=source)
+    return read_txc(source)
+
+
+def read_golden(fixture, table):
+    """A golden table: <table>.csv, or <table>.zip holding that CSV; None if absent"""
+    directory = DATA_DIR / "golden" / fixture
+    for candidate in (directory / (table + ".csv"), directory / (table + ".zip")):
+        if candidate.exists():
+            return pd.read_csv(candidate, dtype=str, keep_default_na=False)
+    return None
+
+
 TABLES = [
     "agency",
     "stops",
@@ -64,14 +79,13 @@ def gtfs_tables(doc):
 
 @pytest.mark.parametrize("fixture", sorted(FIXTURES))
 def test_gtfs_tables_match_golden(fixture):
-    tables = gtfs_tables(read_txc(FIXTURES[fixture]))
+    tables = gtfs_tables(read_fixture(fixture))
     for name in TABLES:
-        golden = DATA_DIR / "golden" / fixture / (name + ".csv")
-        if not golden.exists():
+        expected = read_golden(fixture, name)
+        if expected is None:
             # No golden file means the table was not produced (calendar_dates
             # when no bank holiday falls into the operating period)
             assert tables[name] is None, name
             continue
-        expected = pd.read_csv(golden, dtype=str, keep_default_na=False)
         produced = tables[name].astype(str).reset_index(drop=True)
         assert_frame_equal(produced, expected, obj=name)
