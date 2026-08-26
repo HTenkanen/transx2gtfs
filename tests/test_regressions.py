@@ -1,6 +1,8 @@
 """Regression tests for bugs fixed in transx2gtfs (one test per bug)."""
 
+import io
 import os
+import shutil
 import sqlite3
 import zipfile
 from urllib.error import URLError
@@ -16,6 +18,7 @@ from transx2gtfs.bank_holidays import get_bank_holiday_dates
 from transx2gtfs.calendar_dates import get_calendar_dates
 from transx2gtfs.dataio import (
     generate_gtfs_export,
+    get_xml_paths,
     read_xml_inside_nested_zip,
     read_xml_inside_zip,
 )
@@ -159,6 +162,29 @@ def test_zipped_xml_honours_declared_encoding(tmp_path):
     assert data.TransXChange.Description.cdata == "Café"
     assert size == len(LATIN1_XML)
     assert name == "latin1.xml"
+
+
+def test_upper_case_extensions_are_found(tmp_path, ferry_file, packed_zip):
+    """.XML/.ZIP names (common on Windows) are discovered like lower-case ones."""
+    shutil.copy(ferry_file, tmp_path / "FERRY.XML")
+    shutil.copy(packed_zip, tmp_path / "PACKED.ZIP")
+    inner = io.BytesIO()
+    with zipfile.ZipFile(inner, "w") as zf:
+        zf.writestr("INNER.XML", LATIN1_XML)
+    with zipfile.ZipFile(tmp_path / "NESTED.ZIP", "w") as zf:
+        zf.writestr("INNER.ZIP", inner.getvalue())
+        zf.writestr("README.TXT", "not an xml file")
+
+    paths = get_xml_paths(str(tmp_path))
+    assert len(paths) == 5
+    assert paths[0] == str(tmp_path / "FERRY.XML")
+
+    nested = [p for p in paths if str(tmp_path / "NESTED.ZIP") in p]
+    assert nested == [{str(tmp_path / "NESTED.ZIP"): {"INNER.ZIP": "INNER.XML"}}]
+    data, size, name = read_xml_inside_nested_zip(nested[0])
+    assert data.TransXChange.Description.cdata == "Café"
+
+    assert len(get_xml_paths(str(tmp_path / "PACKED.ZIP"))) == 3
 
 
 class SerialPool:

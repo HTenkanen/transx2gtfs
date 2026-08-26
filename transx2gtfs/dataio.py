@@ -2,10 +2,14 @@ import sqlite3
 import pandas as pd
 from zipfile import ZipFile, ZIP_DEFLATED
 import csv
-import glob
 import io
 import os
 import untangle
+
+
+def _has_extension(path, extension):
+    """Case-insensitive extension check (e.g. both 'a.xml' and 'A.XML')."""
+    return path.lower().endswith(extension)
 
 
 def get_paths_from_zip(zip_filepath):
@@ -17,17 +21,17 @@ def get_paths_from_zip(zip_filepath):
     files_in_zip = z.namelist()
 
     for name in files_in_zip:
-        if name.endswith("xml"):
+        if _has_extension(name, ".xml"):
             # Create dictionary with name as key and zip filepath value
             xml_contents.append({name: z.filename})
 
         # If the zip contained another zip take it's contents
-        elif name.endswith(".zip"):
+        elif _has_extension(name, ".zip"):
             # Read inner zip to memory
             inner_zip = ZipFile(io.BytesIO(z.read(name)))
             # Read files from inner zip
             for inner_name in inner_zip.namelist():
-                if inner_name.endswith("xml"):
+                if _has_extension(inner_name, ".xml"):
                     xml_contents.append({z.filename: {name: inner_name}})
     return xml_contents
 
@@ -45,16 +49,18 @@ def get_xml_paths(filepath):
     # ------------------
     if os.path.isdir(filepath):
         # Read all XML and zip files
-        xml_contents = glob.glob(os.path.join(filepath, "*.xml"))
-        zip_contents = glob.glob(os.path.join(filepath, "*.zip"))
+        entries = [
+            os.path.join(filepath, name) for name in sorted(os.listdir(filepath))
+        ]
+        xml_contents = [p for p in entries if _has_extension(p, ".xml")]
+        zip_contents = [p for p in entries if _has_extension(p, ".zip")]
 
         # Parse xml references inside zip files
-        if len(zip_contents) > 0:
-            for zfp in zip_contents:
-                xml_contents += get_paths_from_zip(zfp)
+        for zfp in zip_contents:
+            xml_contents += get_paths_from_zip(zfp)
 
     # Input is a ZipFile
-    elif os.path.isfile(filepath) and filepath.endswith(".zip"):
+    elif os.path.isfile(filepath) and _has_extension(filepath, ".zip"):
         xml_contents = get_paths_from_zip(filepath)
 
     else:
