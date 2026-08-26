@@ -207,8 +207,12 @@ def process_vehicle_journeys(doc, service_jp_info):
         else:
             trip_id = "%s_%s" % (service_ref, vehicle_journey_id)
 
-        # Walk the timing links of all sections of the journey pattern in order
+        # Walk the timing links of all sections of the journey pattern in order.
+        # A link's From stop is reached after the run time of the *previous* link;
+        # the link's own run time is applied to its To stop (the next link's From
+        # stop, or the last stop of the trip).
         stop_num = 1
+        previous_duration = 0
         for section in sections:
             for link in section.timing_links:
 
@@ -229,7 +233,7 @@ def process_vehicle_journeys(doc, service_jp_info):
                     timepoint = 1
 
                 else:
-                    current_dt = current_dt + timedelta(seconds=duration)
+                    current_dt = current_dt + timedelta(seconds=previous_duration)
 
                     # Timepoint
                     timepoint = 0
@@ -281,6 +285,7 @@ def process_vehicle_journeys(doc, service_jp_info):
 
                 # Update stop number
                 stop_num += 1
+                previous_duration = duration
 
         # After all timing links have been iterated over,
         # the last stop needs to be added separately
