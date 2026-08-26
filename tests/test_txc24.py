@@ -10,7 +10,7 @@ from transx2gtfs.calendar import get_calendar, parse_active_days
 from transx2gtfs.calendar_dates import get_calendar_dates
 from transx2gtfs.routes import get_routes
 from transx2gtfs.stop_times import get_stop_times
-from transx2gtfs.transxchange import get_gtfs_info
+from transx2gtfs.transxchange import GTFS_INFO_COLUMNS, get_gtfs_info
 from transx2gtfs.trips import get_trips
 from transx2gtfs.txc import read_txc
 
@@ -144,6 +144,61 @@ def bh(operation="", non_operation=""):
         "<DaysOfOperation>%s</DaysOfOperation>" % operation if operation else "",
         (
             "<DaysOfNonOperation>%s</DaysOfNonOperation>" % non_operation
+            if non_operation
+            else ""
+        ),
+    )
+
+
+def special(operation="", non_operation=""):
+    def ranges(items):
+        return "".join(
+            "<DateRange><StartDate>%s</StartDate><EndDate>%s</EndDate></DateRange>" % r
+            for r in items
+        )
+
+    return "<SpecialDaysOperation>%s%s</SpecialDaysOperation>" % (
+        (
+            "<DaysOfOperation>%s</DaysOfOperation>" % ranges(operation)
+            if operation
+            else ""
+        ),
+        (
+            "<DaysOfNonOperation>%s</DaysOfNonOperation>" % ranges(non_operation)
+            if non_operation
+            else ""
+        ),
+    )
+
+
+ORGANISATIONS = (
+    "<ServicedOrganisation><OrganisationCode>SCH</OrganisationCode><Name>School</Name>"
+    "<WorkingDays><DateRange><StartDate>2027-01-04</StartDate>"
+    "<EndDate>2027-02-12</EndDate></DateRange>"
+    "<DateRange><StartDate>2027-02-22</StartDate>"
+    "<EndDate>2027-03-26</EndDate></DateRange></WorkingDays>"
+    "<Holidays><DateRange><StartDate>2027-02-15</StartDate>"
+    "<EndDate>2027-02-19</EndDate></DateRange></Holidays>"
+    "</ServicedOrganisation>"
+    "<ServicedOrganisation><OrganisationCode>COL</OrganisationCode><Name>College</Name>"
+    "<WorkingDays><DateRange><StartDate>2027-03-29</StartDate>"
+    "<EndDate>2027-03-31</EndDate></DateRange></WorkingDays>"
+    "</ServicedOrganisation>"
+)
+
+
+def serviced(operation=(), non_operation=()):
+    def refs(items):
+        return "".join(
+            "<%s><ServicedOrganisationRef>%s</ServicedOrganisationRef></%s>"
+            % (kind, code, kind)
+            for code, kind in items
+        )
+
+    return "<ServicedOrganisationDayType>%s%s</ServicedOrganisationDayType>" % (
+        "<DaysOfOperation>%s</DaysOfOperation>" % refs(operation) if operation else "",
+        (
+            "<DaysOfNonOperation>%s</DaysOfNonOperation>" % refs(non_operation)
             if non_operation
             else ""
         ),
@@ -351,7 +406,9 @@ def test_journey_without_days_runs_every_day_and_holidays_only_runs_on_holidays(
             "<HolidaysOnly />", bank_holidays=bh(non_operation="<AllBankHolidays />")
         ),
     )
-    assert tables(document(journeys=[never]))["calendar_dates"] is None
+    with pytest.warns(UserWarning, match="'VJ_1' never operates"):
+        t = tables(document(journeys=[never, journey("VJ_2", departure="09:00:00")]))
+    assert t["trips"]["trip_id"].to_list() == ["JPS_1_MondayToSunday_0900"]
 
 
 def test_bank_holiday_exceptions_and_precedence():
@@ -564,3 +621,346 @@ def test_same_time_journeys_with_different_calendars_keep_separate_trips():
     assert len(t["trips"]) == 2 and t["trips"]["trip_id"].is_unique
     assert t["trips"]["trip_id"].iloc[0] == "JPS_1_MondayToSunday_0800"
     assert t["trips"]["trip_id"].iloc[1].startswith("JPS_1_MondayToSunday_0800_")
+
+
+# Special days and serviced organisations -----------------------------------------
+
+
+def test_special_days_trim_exclude_add_and_remove():
+    # non-operation at the start and end shortens the period, in the middle it excludes
+    prof = profile(
+        special_days=special(
+            non_operation=[
+                ("2027-01-01", "2027-01-08"),
+                ("2027-02-01", "2027-02-02"),
+                ("2027-03-25", "2027-04-10"),
+            ]
+        )
+    )
+    t = tables(document(journeys=[journey("VJ_1", profile=prof)]))
+    assert t["calendar"][["start_date", "end_date"]].values.tolist() == [
+        ["20270109", "20270324"]
+    ]
+    assert exception_dates(t["calendar_dates"], 2) == {"20270201", "20270202"}
+
+    prof = profile(
+        special_days=special(operation=[("2027-01-09", "2027-01-10")])
+    )  # a weekend
+    t = tables(document(journeys=[journey("VJ_1", profile=prof)]))
+    assert exception_dates(t["calendar_dates"], 1) == {"20270109", "20270110"}
+
+    prof = profile(special_days=special(non_operation=[("2026-12-01", "2027-04-30")]))
+    with pytest.warns(UserWarning, match="never operates"):
+        t = tables(
+            document(
+                journeys=[
+                    journey("VJ_1", profile=prof),
+                    journey("VJ_2", departure="09:00:00"),
+                ]
+            )
+        )
+    assert len(t["trips"]) == 1
+
+
+def test_huge_date_ranges_are_bounded_to_the_period():
+    prof = profile(
+        special_days=special(
+            non_operation=[("0001-01-01", "2027-01-06")],
+            operation=[("2027-03-27", "9999-12-31")],
+        )
+    )
+    t = tables(document(journeys=[journey("VJ_1", profile=prof)]))
+    assert t["calendar"]["start_date"].to_list() == ["20270107"]
+    assert exception_dates(t["calendar_dates"], 1) == {"20270327", "20270328"}
+
+
+def test_only_special_days_trim_the_period_edges():
+    # New Year's Day 2027 is the first Friday of a period starting 2027-01-01
+    prof = profile(bank_holidays=bh(non_operation="<NewYearsDay />"))
+    t = tables(
+        document(
+            operating_period="<StartDate>2027-01-01</StartDate><EndDate>2027-01-31</EndDate>",
+            journeys=[journey("VJ_1", profile=prof)],
+        )
+    )
+    assert t["calendar"]["start_date"].to_list() == ["20270101"]
+    assert exception_dates(t["calendar_dates"], 2) == {"20270101"}
+
+
+def test_serviced_organisation_restriction_union_and_exclusion():
+    prof = profile(serviced=serviced(operation=[("SCH", "WorkingDays")]))
+    t = tables(
+        document(
+            serviced_organisations=ORGANISATIONS,
+            journeys=[journey("VJ_1", profile=prof)],
+        )
+    )
+    assert t["calendar"][["start_date", "end_date"]].values.tolist() == [
+        ["20270104", "20270326"]
+    ]
+    # the half-term week (15-19 Feb) is outside the working days: excluded
+    assert exception_dates(t["calendar_dates"], 2) == {
+        "20270215",
+        "20270216",
+        "20270217",
+        "20270218",
+        "20270219",
+    }
+
+    prof = profile(
+        serviced=serviced(operation=[("SCH", "WorkingDays"), ("COL", "WorkingDays")])
+    )
+    t = tables(
+        document(
+            serviced_organisations=ORGANISATIONS,
+            journeys=[journey("VJ_1", profile=prof)],
+        )
+    )
+    assert t["calendar"]["end_date"].to_list() == [
+        "20270331"
+    ]  # union extends to the college dates
+    assert "20270329" not in exception_dates(t["calendar_dates"], 2)
+
+    prof = profile(
+        serviced=serviced(operation=[("SCH", "WorkingDays"), ("SCH", "Holidays")])
+    )
+    t = tables(
+        document(
+            serviced_organisations=ORGANISATIONS,
+            journeys=[journey("VJ_1", profile=prof)],
+        )
+    )
+    assert t["calendar_dates"] is None  # working days plus holidays cover every weekday
+
+    prof = profile(serviced=serviced(non_operation=[("SCH", "Holidays")]))
+    t = tables(
+        document(
+            serviced_organisations=ORGANISATIONS,
+            journeys=[journey("VJ_1", profile=prof)],
+        )
+    )
+    assert exception_dates(t["calendar_dates"], 2) == {
+        "20270215",
+        "20270216",
+        "20270217",
+        "20270218",
+        "20270219",
+    }
+
+    with pytest.raises(ValueError, match="Unknown ServicedOrganisation 'NOPE'"):
+        tables(
+            document(
+                serviced_organisations=ORGANISATIONS,
+                journeys=[
+                    journey(
+                        "VJ_1",
+                        profile=profile(
+                            serviced=serviced(operation=[("NOPE", "WorkingDays")])
+                        ),
+                    )
+                ],
+            )
+        )
+
+
+def test_explicit_addition_overrides_an_implied_gap_but_not_a_removal():
+    # 2027-02-17 (Wednesday) is a half-term gap; adding it explicitly keeps it
+    prof = profile(
+        serviced=serviced(operation=[("SCH", "WorkingDays")]),
+        special_days=special(operation=[("2027-02-17", "2027-02-17")]),
+    )
+    t = tables(
+        document(
+            serviced_organisations=ORGANISATIONS,
+            journeys=[journey("VJ_1", profile=prof)],
+        )
+    )
+    assert "20270217" not in exception_dates(t["calendar_dates"], 2)
+    assert "20270217" not in exception_dates(
+        t["calendar_dates"], 1
+    )  # inside the weekday pattern: no row
+    # an explicit removal on the same date wins
+    prof = profile(
+        special_days=special(
+            operation=[("2027-02-17", "2027-02-17")],
+            non_operation=[("2027-02-17", "2027-02-17")],
+        )
+    )
+    t = tables(document(journeys=[journey("VJ_1", profile=prof)]))
+    assert exception_dates(t["calendar_dates"], 2) == {"20270217"}
+
+
+def test_same_time_journeys_with_different_calendar_bounds_keep_separate_trips():
+    plain = journey("VJ_1")
+    clipped = journey(
+        "VJ_2", profile=profile(serviced=serviced(operation=[("COL", "WorkingDays")]))
+    )
+    t = tables(
+        document(serviced_organisations=ORGANISATIONS, journeys=[plain, clipped])
+    )
+    assert t["calendar_dates"] is None  # the college dates need no exception rows
+    assert len(t["trips"]) == 2 and t["trips"]["trip_id"].is_unique
+    assert sorted(t["calendar"]["end_date"]) == ["20270331", "20270331"]
+    assert sorted(t["calendar"]["start_date"]) == ["20270104", "20270329"]
+
+
+def test_document_whose_journeys_never_operate_yields_an_empty_table():
+    prof = profile(special_days=special(non_operation=[("2026-12-01", "2027-04-30")]))
+    with pytest.warns(UserWarning, match="no vehicle journey operates"):
+        info = get_gtfs_info(
+            read_txc(document(journeys=[journey("VJ_1", profile=prof)]))
+        )
+    assert len(info) == 0 and list(info.columns) == GTFS_INFO_COLUMNS
+    assert len(get_stop_times(info)) == 0
+    assert get_calendar_dates(info) is None
+
+
+def test_journeys_whose_every_operating_day_is_removed_never_operate():
+    # Wednesdays only, every Wednesday of the period removed
+    wednesdays = [
+        ("2027-01-06", "2027-01-06"),
+        ("2027-01-13", "2027-01-13"),
+        ("2027-01-20", "2027-01-20"),
+    ]
+    prof = profile("<Wednesday />", special_days=special(non_operation=wednesdays))
+    period = "<StartDate>2027-01-04</StartDate><EndDate>2027-01-24</EndDate>"
+    with pytest.warns(UserWarning, match="'VJ_1' never operates"):
+        t = tables(
+            document(
+                operating_period=period,
+                journeys=[journey("VJ_1", profile=prof), journey("VJ_2")],
+            )
+        )
+    assert len(t["trips"]) == 1
+    # an explicit addition keeps the journey alive
+    prof = profile(
+        "<Wednesday />",
+        special_days=special(
+            non_operation=wednesdays, operation=[("2027-01-10", "2027-01-10")]
+        ),
+    )
+    t = tables(
+        document(operating_period=period, journeys=[journey("VJ_1", profile=prof)])
+    )
+    assert exception_dates(t["calendar_dates"], 1) == {"20270110"}
+    assert exception_dates(t["calendar_dates"], 2) == {
+        "20270106",
+        "20270113",
+        "20270120",
+    }
+    assert t["calendar"][["start_date", "end_date"]].values.tolist() == [
+        ["20270104", "20270124"]
+    ]
+
+
+def test_explicit_additions_outside_the_organisation_calendar_are_kept():
+    # the college runs 29-31 March; a Saturday in January is added explicitly
+    prof = profile(
+        serviced=serviced(operation=[("COL", "WorkingDays")]),
+        special_days=special(operation=[("2027-01-09", "2027-01-09")]),
+    )
+    t = tables(
+        document(
+            serviced_organisations=ORGANISATIONS,
+            journeys=[journey("VJ_1", profile=prof)],
+        )
+    )
+    assert t["calendar"][["start_date", "end_date"]].values.tolist() == [
+        ["20270329", "20270331"]
+    ]
+    assert exception_dates(t["calendar_dates"], 1) == {"20270109"}
+    assert exception_dates(t["calendar_dates"], 2) == set()
+
+
+def test_organisation_without_dates_in_the_period_keeps_explicit_additions():
+    prof = profile(serviced=serviced(operation=[("COL", "WorkingDays")]))
+    period = "<StartDate>2027-01-04</StartDate><EndDate>2027-01-31</EndDate>"
+    with pytest.warns(UserWarning, match="'VJ_1' never operates"):
+        t = tables(
+            document(
+                serviced_organisations=ORGANISATIONS,
+                operating_period=period,
+                journeys=[journey("VJ_1", profile=prof), journey("VJ_2")],
+            )
+        )
+    assert len(t["trips"]) == 1
+    prof = profile(
+        serviced=serviced(operation=[("COL", "WorkingDays")]),
+        special_days=special(operation=[("2027-01-09", "2027-01-09")]),
+    )
+    t = tables(
+        document(
+            serviced_organisations=ORGANISATIONS,
+            operating_period=period,
+            journeys=[journey("VJ_1", profile=prof)],
+        )
+    )
+    assert exception_dates(t["calendar_dates"], 1) == {"20270109"}
+    # every weekday of the period is outside the college dates
+    assert len(exception_dates(t["calendar_dates"], 2)) == 20
+
+
+def test_special_days_and_organisations_are_inherited_from_the_service():
+    service_profile = profile(
+        special_days=special(non_operation=[("2027-02-01", "2027-02-02")]),
+        serviced=serviced(non_operation=[("SCH", "Holidays")]),
+    )
+    t = tables(
+        document(
+            serviced_organisations=ORGANISATIONS,
+            service_profile=service_profile,
+            journeys=[journey("VJ_1", profile=profile("<MondayToSunday />"))],
+        )
+    )
+    assert exception_dates(t["calendar_dates"], 2) == {
+        "20270201",
+        "20270202",
+        "20270215",
+        "20270216",
+        "20270217",
+        "20270218",
+        "20270219",
+    }
+    # a journey with its own special days keeps the service's organisation rule only
+    own = profile(
+        "<MondayToSunday />",
+        special_days=special(non_operation=[("2027-03-01", "2027-03-01")]),
+    )
+    t = tables(
+        document(
+            serviced_organisations=ORGANISATIONS,
+            service_profile=service_profile,
+            journeys=[journey("VJ_1", profile=own)],
+        )
+    )
+    assert "20270201" not in exception_dates(t["calendar_dates"], 2)
+    assert {"20270301", "20270215"} <= exception_dates(t["calendar_dates"], 2)
+
+
+def test_periods_at_the_edge_of_the_calendar_do_not_overflow():
+    period = "<StartDate>9999-12-31</StartDate><EndDate>9999-12-31</EndDate>"
+    prof = profile(
+        "<MondayToSunday />",
+        special_days=special(non_operation=[("9999-12-31", "9999-12-31")]),
+    )
+    with pytest.warns(UserWarning, match="'VJ_1' never operates"):
+        t = tables(
+            document(
+                operating_period=period,
+                root_attributes="",
+                journeys=[journey("VJ_1", profile=prof), journey("VJ_2")],
+            )
+        )
+    assert t["calendar"]["start_date"].to_list() == ["99991231"]
+
+
+def test_daterange_reaches_the_last_representable_date():
+    from datetime import date
+
+    from transx2gtfs.bank_holidays import daterange
+
+    assert list(daterange(date(9999, 12, 30), date.max)) == [
+        date(9999, 12, 30),
+        date.max,
+    ]
+    assert list(daterange(date(2027, 1, 2), date(2027, 1, 1))) == []

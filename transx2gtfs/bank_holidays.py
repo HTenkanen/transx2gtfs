@@ -14,7 +14,7 @@ import io
 import os
 import urllib.request
 import warnings
-from datetime import date
+from datetime import date, timedelta
 from urllib.error import URLError
 
 import pandas as pd
@@ -250,3 +250,13 @@ def get_bank_holiday_dates(gtfs_info):
     if not dates:
         return None
     return [day.strftime("%Y%m%d") for day in dates]
+
+
+def daterange(start, end):
+    """Every date from start to end inclusive (end may be date.max)."""
+    day = start
+    while day <= end:
+        yield day
+        if day == end:
+            return
+        day += timedelta(days=1)

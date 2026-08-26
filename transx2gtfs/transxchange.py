@@ -1,10 +1,12 @@
 import dataclasses
-from datetime import datetime, timedelta, time
+import warnings
+from datetime import date, datetime, timedelta, time
 
 import pandas as pd
 
 from transx2gtfs.bank_holidays import (
     bank_holiday_table,
+    daterange,
     detect_division,
     expand_bank_holiday_names,
     read_bank_holidays,
@@ -16,6 +18,30 @@ from transx2gtfs.stop_times import exceptions_digest, generate_service_id, get_d
 
 DEFAULT_WEEKDAYS = "MondayToSunday"
 OPERATING_PERIOD_DEFAULT_DAYS = 365
+GTFS_INFO_COLUMNS = [
+    "stop_id",
+    "stop_sequence",
+    "timepoint",
+    "arrival_time",
+    "departure_time",
+    "route_link_ref",
+    "agency_id",
+    "trip_id",
+    "route_id",
+    "vehicle_journey_id",
+    "service_ref",
+    "direction_id",
+    "direction",
+    "line_name",
+    "travel_mode",
+    "trip_headsign",
+    "vehicle_type",
+    "start_date",
+    "end_date",
+    "weekdays",
+    "exceptions",
+    "service_id",
+]
 
 
 def parse_date(text):
@@ -122,8 +148,34 @@ class _Calendars:
         return self._tables[key]
 
 
+def _range_dates(ranges, start, end):
+    """Dates of the (start, end) ISO ranges, bounded to the period [start, end]"""
+    dates = set()
+    for range_start, range_end in ranges:
+        first = max(parse_date(range_start), start)
+        last = min(parse_date(range_end), end)
+        if first <= last:
+            dates.update(daterange(first, last))
+    return dates
+
+
+def _organisation_dates(doc, refs, start, end):
+    dates = set()
+    for code, kind in refs:
+        try:
+            organisation = doc.serviced_organisation(code)
+        except KeyError:
+            raise ValueError("Unknown ServicedOrganisation '%s'." % code) from None
+        ranges = (
+            organisation.holidays if kind == "Holidays" else organisation.working_days
+        )
+        dates.update(_range_dates(ranges, start, end))
+    return dates
+
+
 def _inherit_profile(profile, fallback):
-    """Fill missing day and bank holiday information from the service profile"""
+    """Fill the day, bank holiday, special day and serviced organisation rules a
+    journey profile does not set from the service profile"""
     if profile is None:
         return fallback
     if fallback is None:
@@ -148,21 +200,40 @@ def _inherit_profile(profile, fallback):
         changes["other_public_holidays_of_non_operation"] = (
             fallback.other_public_holidays_of_non_operation
         )
+    # Special days and serviced organisations are inherited as a whole too
+    if not (profile.special_days_of_operation or profile.special_days_of_non_operation):
+        changes["special_days_of_operation"] = fallback.special_days_of_operation
+        changes["special_days_of_non_operation"] = (
+            fallback.special_days_of_non_operation
+        )
+    if not (
+        profile.serviced_organisation_days_of_operation
+        or profile.serviced_organisation_days_of_non_operation
+    ):
+        changes["serviced_organisation_days_of_operation"] = (
+            fallback.serviced_organisation_days_of_operation
+        )
+        changes["serviced_organisation_days_of_non_operation"] = (
+            fallback.serviced_organisation_days_of_non_operation
+        )
     return dataclasses.replace(profile, **changes) if changes else profile
 
 
-def journey_calendar(calendars, profile, start, end):
+def journey_calendar(doc, calendars, profile, start, end):
     """
     Operating period, weekday pattern and exceptions of one journey.
 
     Returns ``(start_date, end_date, weekdays, exceptions)`` with GTFS dates and
-    the encoded exceptions (bank holidays added on days outside the weekday
-    pattern, removed on days inside it; a removal wins over an addition).
+    the encoded exceptions (dates added on days outside the weekday pattern,
+    removed on days inside it; a removal wins over an addition), or None when
+    the journey never operates.
     """
     weekdays = get_weekday_info(profile) or DEFAULT_WEEKDAYS
     active = {i for i, on in enumerate(parse_active_days(weekdays).values()) if on}
 
     added, removed = set(), set()
+    # Only SpecialDaysOperation non-operation shortens the period at its edges
+    special_removed = set()
     if profile is not None:
         holidays_only = profile.holidays_only or any(
             name.endswith("HolidaysOnly") for name in (profile.days_of_week or [])
@@ -192,10 +263,71 @@ def journey_calendar(calendars, profile, start, end):
             for _, d in profile.other_public_holidays_of_non_operation
             if d and start <= parse_date(d) <= end
         }
+        added |= _range_dates(profile.special_days_of_operation, start, end)
+        special_removed = _range_dates(
+            profile.special_days_of_non_operation, start, end
+        )
+        removed |= special_removed
+        removed |= _organisation_dates(
+            doc, profile.serviced_organisation_days_of_non_operation, start, end
+        )
 
-    type1 = {day for day in added if day not in removed and day.weekday() not in active}
-    type2 = {day for day in removed if day.weekday() in active}
+        # Serviced organisation days of operation restrict the journey to the
+        # union of the organisations' dates (explicit additions still apply)
+        if profile.serviced_organisation_days_of_operation:
+            allowed = _organisation_dates(
+                doc, profile.serviced_organisation_days_of_operation, start, end
+            )
+            if allowed:
+                start = max(start, min(allowed))
+                end = min(end, max(allowed))
+            gaps = {
+                day
+                for day in daterange(start, end)
+                if day.weekday() in active and day not in allowed
+            }
+            removed |= gaps - added
+
+    # Special-day non-operation at the edges shortens the period instead of
+    # adding exceptions; a period removed up to the last representable date
+    # (or from the first one) is gone
+    while start <= end and start in special_removed:
+        if start == date.max:
+            return None
+        start += timedelta(days=1)
+    while end >= start and end in special_removed:
+        if end == date.min:
+            return None
+        end -= timedelta(days=1)
+    if start > end:
+        return None
+
+    # A journey with no operating date left never operates
+    operates = any(
+        day.weekday() in active and day not in removed for day in daterange(start, end)
+    ) or any(day not in removed for day in added)
+    if not operates:
+        return None
+
+    in_period = lambda day: start <= day <= end  # noqa: E731
+    type1 = {
+        day
+        for day in added
+        if day not in removed and (day.weekday() not in active or not in_period(day))
+    }
+    type2 = {day for day in removed if in_period(day) and day.weekday() in active}
     return gtfs_date(start), gtfs_date(end), weekdays, encode_exceptions(type1, type2)
+
+
+def _journey_fingerprint(exceptions, period, service_period):
+    """What distinguishes same-time journeys of one pattern: exceptions and a
+    calendar clipped away from the service's period; '' when neither applies"""
+    parts = []
+    if exceptions:
+        parts.append(exceptions)
+    if period != service_period:
+        parts.append("period:%s:%s" % period)
+    return "|".join(parts)
 
 
 # Main table
@@ -301,12 +433,22 @@ def process_vehicle_journeys(doc, service_jp_info):
         travel_mode = int(travel_mode)
 
         # Operating period, weekdays and exceptions of the journey
-        start_date, end_date, weekdays, exceptions = journey_calendar(
+        service_period = (start_date, end_date)
+        calendar = journey_calendar(
+            doc,
             calendars,
             profile,
             datetime.strptime(start_date, "%Y%m%d").date(),
             datetime.strptime(end_date, "%Y%m%d").date(),
         )
+        if calendar is None:
+            warnings.warn(
+                "VehicleJourney '%s' never operates, skipping." % vehicle_journey_id,
+                UserWarning,
+                stacklevel=2,
+            )
+            continue
+        start_date, end_date, weekdays, exceptions = calendar
 
         # Get departure time
         departure_time = journey.departure_time
@@ -347,10 +489,13 @@ def process_vehicle_journeys(doc, service_jp_info):
                 str(hour).zfill(2),
                 str(minute).zfill(2),
             )
-            # Journeys at the same time with different exception calendars
-            # must not share a trip
-            if exceptions:
-                trip_id = "%s_%s" % (trip_id, exceptions_digest(exceptions))
+            # Journeys at the same time with different calendars must not
+            # share a trip
+            fingerprint = _journey_fingerprint(
+                exceptions, (start_date, end_date), service_period
+            )
+            if fingerprint:
+                trip_id = "%s_%s" % (trip_id, exceptions_digest(fingerprint))
         else:
             trip_id = "%s_%s" % (service_ref, vehicle_journey_id)
 
@@ -446,6 +591,14 @@ def process_vehicle_journeys(doc, service_jp_info):
         info.update(journey_info)
         rows.append(info)
 
+    if not rows:
+        warnings.warn(
+            "%s: no vehicle journey operates, nothing to convert."
+            % (doc.file_name or "TransXChange document"),
+            UserWarning,
+            stacklevel=2,
+        )
+        return pd.DataFrame(columns=GTFS_INFO_COLUMNS)
     gtfs_info = pd.DataFrame(rows)
 
     # Generate service_id column into the table
