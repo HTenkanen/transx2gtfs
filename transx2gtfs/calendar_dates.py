@@ -3,31 +3,22 @@ import warnings
 import pandas as pd
 
 from transx2gtfs.bank_holidays import get_bank_holiday_dates
+from transx2gtfs.calendar import join_names
 
 
-def _non_operation_names(operating_profile):
-    days = operating_profile.BankHolidayOperation.DaysOfNonOperation.get_elements()
-    names = [elem._name for elem in days]
-    if len(names) == 1:
-        return names[0]
-    return "|".join(names)
-
-
-def get_service_calendar_dates_exceptions(data):
-    """Parses calendar dates exception info from TransXChange Service element"""
-    try:
-        service = data.TransXChange.Services.Service
-        return _non_operation_names(service.OperatingProfile)
-    except Exception:
+def get_calendar_dates_exceptions(operating_profile):
+    """Bank holiday non-operation days ('AllBankHolidays', 'ChristmasDay|BoxingDay',
+    ...) of an OperatingProfile, or None if it has no DaysOfNonOperation"""
+    if operating_profile is None:
         return None
+    return join_names(operating_profile.bank_holiday_days_of_non_operation)
 
 
-def get_calendar_dates_exceptions(vehicle_journey_element):
-    """Parses calendar dates exception info from TransXChange VehicleJourney element"""
-    try:
-        return _non_operation_names(vehicle_journey_element.OperatingProfile)
-    except Exception:
+def get_service_calendar_dates_exceptions(doc):
+    """Bank holiday non-operation days of the first Service of the document"""
+    if not doc.services:
         return None
+    return get_calendar_dates_exceptions(doc.services[0].operating_profile)
 
 
 def get_calendar_dates(gtfs_info):

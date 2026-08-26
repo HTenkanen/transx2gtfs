@@ -142,7 +142,7 @@ def process_files(parallel):
         calendar_dates = get_calendar_dates(gtfs_info)
 
         # Parse routes
-        routes = get_routes(gtfs_info=gtfs_info, data=data)
+        routes = get_routes(gtfs_info=gtfs_info, doc=data)
 
         # Only export data into db if there exists valid stop_times data
         if len(stop_times) > 0:

@@ -52,9 +52,9 @@ If you don't know how to install Python, you can take a look for example [these 
 
 transx2gtfs depends on:
 
+ - lxml (>= 5.0)
  - pandas (>= 2.0)
  - pyproj (>= 3.0)
- - untangle
 
 ## Basic usage
 

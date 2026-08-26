@@ -6,8 +6,6 @@ import warnings
 import pandas as pd
 from pyproj import Transformer
 
-from transx2gtfs.utils import as_list
-
 NAPTAN_URL = "https://naptan.api.dft.gov.uk/v1/access-nodes?dataFormat=csv"
 NAPTAN_PATH_ENV = "TRANSX2GTFS_NAPTAN_PATH"
 
@@ -115,31 +113,38 @@ def _lookup_naptan_stop(naptan_stops, stop_id):
     return None
 
 
-def _stop_from_location(stop_point, stop_id, stop_name):
-    """Build a stop row from the StopPoint's own Easting/Northing or lon/lat."""
-    x = float(stop_point.Place.Location.Easting.cdata)
-    y = float(stop_point.Place.Location.Northing.cdata)
-    # Values in metres are OSGB36 grid coordinates, otherwise assume WGS84
-    if x > 180:
-        x, y = osgb36_to_wgs84(x, y)
-    return dict(stop_id=stop_id, stop_name=stop_name, stop_lat=y, stop_lon=x)
+def _stop_from_location(stop_point):
+    """Build a stop row from the StopPoint's own lon/lat or Easting/Northing."""
+    if stop_point.longitude is not None and stop_point.latitude is not None:
+        x, y = float(stop_point.longitude), float(stop_point.latitude)
+    else:
+        x = float(stop_point.easting)
+        y = float(stop_point.northing)
+        # Values in metres are OSGB36 grid coordinates, otherwise assume WGS84
+        if x > 180:
+            x, y = osgb36_to_wgs84(x, y)
+    return dict(
+        stop_id=stop_point.atco_code,
+        stop_name=stop_point.common_name,
+        stop_lat=y,
+        stop_lon=x,
+    )
 
 
-def _get_tfl_style_stops(data, naptan_stops=None):
-    """Parse StopPoint elements (TfL style), coordinates from NaPTAN or the file."""
+def _get_tfl_style_stops(doc, naptan_stops=None):
+    """Parse StopPoint records (TfL style), coordinates from NaPTAN or the file."""
     if naptan_stops is None:
         naptan_stops = read_naptan_stops()
 
     rows = []
-    for p in as_list(data.TransXChange.StopPoints.StopPoint):
-        stop_name = p.Descriptor.CommonName.cdata
-        stop_id = p.AtcoCode.cdata
+    for p in doc.stop_points:
+        stop_id = p.atco_code
 
         stop = _lookup_naptan_stop(naptan_stops, stop_id)
         if stop is None:
             try:
-                stop = _stop_from_location(p, stop_id, stop_name)
-            except Exception:
+                stop = _stop_from_location(p)
+            except (TypeError, ValueError):
                 warnings.warn(
                     "Did not find a NaPTAN stop for '%s'" % stop_id,
                     UserWarning,
@@ -151,14 +156,14 @@ def _get_tfl_style_stops(data, naptan_stops=None):
     return pd.DataFrame(rows, columns=_stop_columns)
 
 
-def _get_txc_21_style_stops(data, naptan_stops=None):
-    """Parse AnnotatedStopPointRef elements, coordinates from NaPTAN."""
+def _get_txc_21_style_stops(doc, naptan_stops=None):
+    """Parse AnnotatedStopPointRef records, coordinates from NaPTAN."""
     if naptan_stops is None:
         naptan_stops = read_naptan_stops()
 
     rows = []
-    for p in as_list(data.TransXChange.StopPoints.AnnotatedStopPointRef):
-        stop_id = p.StopPointRef.cdata
+    for p in doc.stop_points:
+        stop_id = p.atco_code
 
         stop = _lookup_naptan_stop(naptan_stops, stop_id)
         if stop is None:
@@ -173,14 +178,14 @@ def _get_txc_21_style_stops(data, naptan_stops=None):
     return pd.DataFrame(rows, columns=_stop_columns)
 
 
-def get_stops(data):
-    """Parse stop data from TransXchange elements"""
+def get_stops(doc):
+    """Parse stop data from the StopPoint records of a TxcDocument"""
     naptan_stops = read_naptan_stops()
 
-    if "StopPoint" in data.TransXChange.StopPoints.__dir__():
-        stop_data = _get_tfl_style_stops(data, naptan_stops)
-    elif "AnnotatedStopPointRef" in data.TransXChange.StopPoints.__dir__():
-        stop_data = _get_txc_21_style_stops(data, naptan_stops)
+    if doc.stop_point_style == "StopPoint":
+        stop_data = _get_tfl_style_stops(doc, naptan_stops)
+    elif doc.stop_point_style == "AnnotatedStopPointRef":
+        stop_data = _get_txc_21_style_stops(doc, naptan_stops)
     else:
         raise ValueError(
             "Did not find tag for Stop data in TransXchange xml. "

@@ -17,11 +17,15 @@ def get_agency_url(operator_code):
     return operator_urls.get(operator_code, "NA")
 
 
-def get_agency(data):
-    """Parse agency information from TransXchange elements"""
-    operator = data.TransXChange.Operators.Operator
-    agency_id = operator.get_attribute("id")
-    agency_name = operator.OperatorNameOnLicence.cdata
+def get_agency(doc):
+    """Parse agency information from the first Operator of a TxcDocument"""
+    if not doc.operators:
+        raise ValueError("TransXChange document does not contain an Operator.")
+    operator = doc.operators[0]
+    agency_id = operator.id
+    agency_name = operator.name_on_licence or operator.short_name or operator.code
+    if agency_name is None:
+        raise ValueError("Operator '%s' does not have a name." % agency_id)
 
     agency = dict(
         agency_id=agency_id,

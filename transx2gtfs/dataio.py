@@ -4,7 +4,8 @@ from zipfile import ZipFile, ZIP_DEFLATED
 import csv
 import io
 import os
-import untangle
+
+from transx2gtfs.txc import read_txc
 
 
 def _has_extension(path, extension):
@@ -71,29 +72,28 @@ def get_xml_paths(filepath):
 
 def read_unpacked_xml(xml_path):
     """
-    Reads an XML with untangle.
+    Reads a TransXChange XML file into a TxcDocument.
     """
     file_size = os.path.getsize(xml_path)
-    parsed_xml = untangle.parse(xml_path)
-    return parsed_xml, file_size, os.path.basename(xml_path)
+    return read_txc(xml_path), file_size, os.path.basename(xml_path)
 
 
 def read_xml_inside_zip(xml_path):
     """
-    Reads an XML with untangle which is inside a ZipFile.
+    Reads a TransXChange XML file inside a ZipFile into a TxcDocument.
     """
     zip_filepath = list(xml_path.values())[0]
     filename = list(xml_path.keys())[0]
     z = ZipFile(zip_filepath)
     file_size = z.getinfo(filename).file_size
-    # Pass bytes so the XML declaration's encoding is honoured
-    parsed_xml = untangle.parse(io.BytesIO(z.read(filename)))
-    return parsed_xml, file_size, filename
+    with z.open(filename) as member:
+        doc = read_txc(member, file_name=filename)
+    return doc, file_size, filename
 
 
 def read_xml_inside_nested_zip(xml_path):
     """
-    Reads an XML with untangle which is in a ZipFile inside another ZipFile.
+    Reads a TransXChange XML file in a ZipFile inside another ZipFile.
     """
     zip_filepath = list(xml_path.keys())[0]
     inner_zip_info = list(xml_path.values())[0]
@@ -106,8 +106,9 @@ def read_xml_inside_nested_zip(xml_path):
     # Read inner zip to memory
     inner_zip = ZipFile(io.BytesIO(z.read(inner_zip_name)))
     file_size = inner_zip.getinfo(xml_name).file_size
-    parsed_xml = untangle.parse(io.BytesIO(inner_zip.read(xml_name)))
-    return parsed_xml, file_size, xml_name
+    with inner_zip.open(xml_name) as member:
+        doc = read_txc(member, file_name=xml_name)
+    return doc, file_size, xml_name
 
 
 def _table_exists(conn, name):

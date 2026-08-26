@@ -1,10 +1,9 @@
-def get_trip_headsign(data, service_ref):
-    """Parse trip headsign based on service reference id"""
-    service = data.TransXChange.Services.Service
-    if service.ServiceCode == service_ref:
-        return service.Description.cdata
-    else:
-        raise ValueError("Could not find trip headsign for", service_ref)
+def get_trip_headsign(doc, service_ref):
+    """Parse trip headsign (service description) based on service reference id"""
+    for service in doc.services:
+        if service.code == service_ref:
+            return service.description
+    raise ValueError("Could not find trip headsign for %s" % service_ref)
 
 
 def get_trips(gtfs_info):

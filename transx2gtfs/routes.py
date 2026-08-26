@@ -2,8 +2,6 @@ import warnings
 
 import pandas as pd
 
-from transx2gtfs.utils import as_list
-
 
 def get_mode(mode):
     """Parse mode from TransXChange value"""
@@ -19,8 +17,8 @@ def get_mode(mode):
         return 4
 
 
-def get_routes(gtfs_info, data):
-    """Get routes from TransXchange elements"""
+def get_routes(gtfs_info, doc):
+    """Get routes from the Route records of a TxcDocument"""
     # Columns to use in output
     use_cols = [
         "route_id",
@@ -31,8 +29,8 @@ def get_routes(gtfs_info, data):
     ]
 
     rows = []
-    for r in as_list(data.TransXChange.Routes.Route):
-        route_id = r.get_attribute("id")
+    for r in doc.routes:
+        route_id = r.id
 
         # Agency and travel mode come from the journey patterns using the route
         route_info = gtfs_info.loc[gtfs_info["route_id"] == route_id]
@@ -46,27 +44,19 @@ def get_routes(gtfs_info, data):
         agency_id = route_info["agency_id"].unique()[0]
         route_type = int(route_info["travel_mode"].unique()[0])
 
-        # Get route long name
-        route_long_name = r.Description.cdata
-
-        # Get route private id
-        route_private_id = r.PrivateCode.cdata
+        if r.description is None or r.private_code is None:
+            raise ValueError("Route '%s' lacks Description or PrivateCode." % route_id)
 
         # Get route short name (test '-_-' separator)
-        route_short_name = route_private_id.split("-_-")[0]
-
-        # Route Section reference (might be needed somewhere)
-        route_section_id = r.RouteSectionRef.cdata
+        route_short_name = r.private_code.split("-_-")[0]
 
         rows.append(
             dict(
                 route_id=route_id,
                 agency_id=agency_id,
-                route_private_id=route_private_id,
-                route_long_name=route_long_name,
                 route_short_name=route_short_name,
+                route_long_name=r.description,
                 route_type=route_type,
-                route_section_id=route_section_id,
             )
         )
 
