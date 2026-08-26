@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "transx2gtfs"
+description = "Convert TransXChange public transport timetables into GTFS"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "Henrikki Tenkanen" }]
+keywords = ["TransXChange", "GTFS", "public transport", "timetables", "UK"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: GIS",
+    "Topic :: Utilities",
+]
+dynamic = ["version"]
+dependencies = [
+    "pandas>=2.0",
+    "pyproj>=3.0",
+    "untangle>=1.2",
+]
+
+[project.optional-dependencies]
+test = ["pytest", "pytest-cov"]
+
+[project.urls]
+Repository = "https://github.com/htenkanen/transx2gtfs"
+"Issue Tracker" = "https://github.com/htenkanen/transx2gtfs/issues"
+
+[project.scripts]
+transx2gtfs = "transx2gtfs.__main__:main"
+
+[tool.setuptools]
+packages = ["transx2gtfs", "transx2gtfs.data"]
+
+[tool.setuptools.package-data]
+"transx2gtfs.data" = ["bank-holidays.json"]
+
+[tool.setuptools.dynamic]
+version = { attr = "transx2gtfs.__version__" }
+
+[tool.black]
+target-version = ["py310", "py311", "py312", "py313", "py314"]
+include = '(transx2gtfs|tests)/.*\.py$'
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--durations=10"

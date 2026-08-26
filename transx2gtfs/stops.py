@@ -1,222 +1,189 @@
 import os
-import pandas as pd
-import pyproj
-import warnings
-import io
-import urllib
-from zipfile import ZipFile
 import tempfile
+import urllib.request
+import warnings
+
+import pandas as pd
+from pyproj import Transformer
+
+from transx2gtfs.utils import as_list
+
+NAPTAN_URL = "https://naptan.api.dft.gov.uk/v1/access-nodes?dataFormat=csv"
+NAPTAN_PATH_ENV = "TRANSX2GTFS_NAPTAN_PATH"
+
+_naptan_columns = {
+    "ATCOCode": "stop_id",
+    "CommonName": "stop_name",
+    "Latitude": "stop_lat",
+    "Longitude": "stop_lon",
+}
+_stop_columns = ["stop_id", "stop_name", "stop_lat", "stop_lon"]
+
+# One NaPTAN frame per process, keyed by (path, mtime)
+_naptan_cache = {}
+_osgb36_to_wgs84 = None
 
 
-def _update_naptan_data(url="http://naptan.app.dft.gov.uk/DataRequest/Naptan.ashx?format=csv",
-                       filepath=None):
-    if filepath is None:
-        temp_dir = tempfile.gettempdir()
-        target_dir = os.path.join(temp_dir, 'transx2gtfs')
-        target_file = os.path.join(target_dir, "NaPTAN_data.zip")
+def default_naptan_path():
+    return os.path.join(tempfile.gettempdir(), "transx2gtfs", "naptan.csv")
 
-        if not os.path.exists(target_dir):
-            os.makedirs(target_dir)
 
-        if os.path.exists(target_file):
-            print("Removing old stop data")
-            os.remove(target_file)
-    else:
-        target_file = filepath
+def get_naptan_path():
+    """Local NaPTAN CSV: TRANSX2GTFS_NAPTAN_PATH if set, else the temp cache."""
+    return os.environ.get(NAPTAN_PATH_ENV) or default_naptan_path()
 
-    # Download the NaPTAN data to temp
-    filepath, msg = urllib.request.urlretrieve(url, target_file)
-    print("Downloaded/updated NaPTAN stop dataset to:\n'{fp}'".format(fp=filepath))
+
+def download_naptan(target_file, url=NAPTAN_URL):
+    """Download the national NaPTAN stop dataset (CSV) to target_file."""
+    target_dir = os.path.dirname(target_file) or "."
+    os.makedirs(target_dir, mode=0o700, exist_ok=True)
+    if os.path.islink(target_file):
+        raise OSError("Refusing to replace symlink '%s' with NaPTAN data" % target_file)
+    print("Downloading NaPTAN stops from %s" % url)
+    # Download into a unique partial file so concurrent runs cannot clobber
+    # each other, then publish it atomically
+    fd, partial = tempfile.mkstemp(prefix="naptan-", suffix=".part", dir=target_dir)
+    os.close(fd)
+    try:
+        urllib.request.urlretrieve(url, partial)
+        os.replace(partial, target_file)
+    finally:
+        if os.path.exists(partial):
+            os.remove(partial)
+    print("Saved NaPTAN stops to '%s'" % target_file)
+    return target_file
+
+
+def ensure_naptan_data(naptan_fp=None):
+    """Return the path of a local NaPTAN CSV, downloading it once if needed."""
+    if naptan_fp is None:
+        naptan_fp = get_naptan_path()
+    if os.path.exists(naptan_fp):
+        return naptan_fp
+    if naptan_fp != default_naptan_path():
+        raise FileNotFoundError("NaPTAN file '%s' does not exist." % naptan_fp)
+    return download_naptan(naptan_fp)
+
+
+def _read_naptan_csv(naptan_fp):
+    usecols = list(_naptan_columns.keys())
+    try:
+        try:
+            stops = pd.read_csv(naptan_fp, usecols=usecols, dtype={"ATCOCode": str})
+        except UnicodeDecodeError:
+            stops = pd.read_csv(
+                naptan_fp, usecols=usecols, dtype={"ATCOCode": str}, encoding="latin1"
+            )
+    except ValueError as e:
+        raise ValueError(
+            "NaPTAN file '%s' must contain the columns %s." % (naptan_fp, usecols)
+        ) from e
+    return stops.rename(columns=_naptan_columns)[_stop_columns]
 
 
 def read_naptan_stops(naptan_fp=None):
     """
-    Reads NaPTAN stops from temp. If the Stops do not exist in the temp, downloads the data.
+    Read NaPTAN stops as a DataFrame with GTFS column names.
+
+    Uses ``naptan_fp``, else ``TRANSX2GTFS_NAPTAN_PATH``, else a copy downloaded
+    once into the temp directory.
     """
-    if naptan_fp is None:
-        naptan_fp = os.path.join(tempfile.gettempdir(),
-                                 'transx2gtfs',
-                                 'NaPTAN_data.zip')
-
-    max_attemps = 20
-    i = 1
-    while True:
-        if not os.path.exists(naptan_fp):
-            _update_naptan_data()
-        else:
-            break
-
-        if i == max_attemps:
-            raise ValueError("Could not update the stops data.\nMax attempts reached.")
-        i += 1
-
-    # Read the stops from the zip
-    z = ZipFile(naptan_fp)
-
-    if 'Stops.csv' not in z.namelist():
-        raise ValueError("NaPTAN dataset did not contain stops!")
-
-    stops = pd.read_csv(io.BytesIO(z.read('Stops.csv')), encoding='latin1',
-                        low_memory=False)
-
-    # Rename required columns into GTFS format
-    stops = stops.rename(columns={
-        'ATCOCode': 'stop_id',
-        'Longitude': 'stop_lon',
-        'Latitude': 'stop_lat',
-        'CommonName': 'stop_name',
-    })
-
-    # Keep only required columns
-    required_cols = ['stop_id', 'stop_lon', 'stop_lat', 'stop_name']
-    for col in required_cols:
-        if col not in stops.columns:
-            raise ValueError(
-                "Required column {col} could not be found from stops DataFrame.".format(
-                col=col)
-            )
-    stops = stops[required_cols].copy()
-    return stops
+    naptan_fp = ensure_naptan_data(naptan_fp)
+    key = (naptan_fp, os.path.getmtime(naptan_fp))
+    if key not in _naptan_cache:
+        _naptan_cache.clear()
+        _naptan_cache[key] = _read_naptan_csv(naptan_fp)
+    return _naptan_cache[key]
 
 
-def _get_tfl_style_stops(data):
-    """"""
-    # Helper projections for transformations
-    # Define the projection
-    # The .srs here returns the Proj4-string presentation of the projection
-    wgs84 = pyproj.Proj("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs")
-    osgb36 = pyproj.Proj(
-        "+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.999601 +x_0=400000 +y_0=-100000 +ellps=airy +towgs84=446.448,-125.157,542.060,0.1502,0.2470,0.8421,-20.4894 +units=m +no_defs <>")
+def osgb36_to_wgs84(easting, northing):
+    """Transform British National Grid coordinates to WGS84 (lon, lat)."""
+    global _osgb36_to_wgs84
+    if _osgb36_to_wgs84 is None:
+        _osgb36_to_wgs84 = Transformer.from_crs(
+            "EPSG:27700", "EPSG:4326", always_xy=True
+        )
+    return _osgb36_to_wgs84.transform(easting, northing)
 
-    # Attributes
-    _stop_id_col = 'stop_id'
 
-    # Container
-    stop_data = pd.DataFrame()
+def _lookup_naptan_stop(naptan_stops, stop_id):
+    stop = naptan_stops.loc[naptan_stops["stop_id"] == stop_id]
+    if len(stop) > 1:
+        raise ValueError("Had more than 1 stop with identical stop reference.")
+    if len(stop) == 1:
+        return stop.iloc[0].to_dict()
+    return None
 
-    # Get stop database
-    naptan_stops = read_naptan_stops()
 
-    # Iterate over stop points
-    for p in data.TransXChange.StopPoints.StopPoint:
-        # Name of the stop
+def _stop_from_location(stop_point, stop_id, stop_name):
+    """Build a stop row from the StopPoint's own Easting/Northing or lon/lat."""
+    x = float(stop_point.Place.Location.Easting.cdata)
+    y = float(stop_point.Place.Location.Northing.cdata)
+    # Values in metres are OSGB36 grid coordinates, otherwise assume WGS84
+    if x > 180:
+        x, y = osgb36_to_wgs84(x, y)
+    return dict(stop_id=stop_id, stop_name=stop_name, stop_lat=y, stop_lon=x)
+
+
+def _get_tfl_style_stops(data, naptan_stops=None):
+    """Parse StopPoint elements (TfL style), coordinates from NaPTAN or the file."""
+    if naptan_stops is None:
+        naptan_stops = read_naptan_stops()
+
+    rows = []
+    for p in as_list(data.TransXChange.StopPoints.StopPoint):
         stop_name = p.Descriptor.CommonName.cdata
-
-        # Stop_id
         stop_id = p.AtcoCode.cdata
 
-        # Get stop info
-        stop = naptan_stops.loc[naptan_stops[_stop_id_col] == stop_id]
+        stop = _lookup_naptan_stop(naptan_stops, stop_id)
+        if stop is None:
+            try:
+                stop = _stop_from_location(p, stop_id, stop_name)
+            except Exception:
+                warnings.warn(
+                    "Did not find a NaPTAN stop for '%s'" % stop_id,
+                    UserWarning,
+                    stacklevel=2,
+                )
+                continue
+        rows.append(stop)
 
-        # If local NAPTAN db does not contain the info,
-        # try to refresh local dump or parse from the data directly
+    return pd.DataFrame(rows, columns=_stop_columns)
 
-        if len(stop) == 0:
-            # Try first to refresh the Stop data
-            # -----------------------------------
-            _update_naptan_data()
-            naptan_stops = read_naptan_stops()
-            stop = naptan_stops.loc[naptan_stops[_stop_id_col] == stop_id]
 
-            if len(stop) == 0:
-                # If was not found, try to read from TransXchange data directly
-                # -------------------------------------------------------------
-                try:
-                    # X and y coordinates - Notice: these might not be available! --> Use NAPTAN database
-                    # Spatial reference - TransXChange might use:
-                    #   - OSGB36 (epsg:7405) spatial reference: https://spatialreference.org/ref/epsg/osgb36-british-national-grid-odn-height/
-                    #   - WGS84 (epsg:4326)
-                    # Detected epsg
-                    detected_epsg = None
-                    x = float(p.Place.Location.Easting.cdata)
-                    y = float(p.Place.Location.Northing.cdata)
+def _get_txc_21_style_stops(data, naptan_stops=None):
+    """Parse AnnotatedStopPointRef elements, coordinates from NaPTAN."""
+    if naptan_stops is None:
+        naptan_stops = read_naptan_stops()
 
-                    # Detect the most probable CRS at the first iteration
-                    if detected_epsg is None:
-                        # Check if the coordinates are in meters
-                        if x > 180:
-                            detected_epsg = 7405
-                        else:
-                            detected_epsg = 4326
-
-                    # Convert point coordinates to WGS84 if they are in OSGB36
-                    if detected_epsg == 7405:
-                        x, y = pyproj.transform(p1=osgb36, p2=wgs84, x=x, y=y)
-
-                    # Create row
-                    stop = dict(stop_id=stop_id,
-                                stop_code=None,
-                                stop_name=stop_name,
-                                stop_lat=y,
-                                stop_lon=x,
-                                stop_url=None
-                                )
-
-                except Exception:
-                    warnings.warn("Did not find a NaPTAN stop for '%s'" % stop_id,
-                                  UserWarning,
-                                  stacklevel=2)
-                    continue
-
-        elif len(stop) > 1:
-            raise ValueError("Had more than 1 stop with identical stop reference.")
-
-        # Add to container
-        stop_data = stop_data.append(stop, ignore_index=True, sort=False)
-
-    return stop_data
-
-def _get_txc_21_style_stops(data):
-    # Attributes
-    _stop_id_col = 'stop_id'
-
-    # Container
-    stop_data = pd.DataFrame()
-
-    # Get stop database
-    naptan_stops = read_naptan_stops()
-
-    # Iterate over stop points using TransXchange version 2.1
-    for p in data.TransXChange.StopPoints.AnnotatedStopPointRef:
-
-        # Stop_id
+    rows = []
+    for p in as_list(data.TransXChange.StopPoints.AnnotatedStopPointRef):
         stop_id = p.StopPointRef.cdata
 
-        # Get stop info
-        stop = naptan_stops.loc[naptan_stops[_stop_id_col] == stop_id]
+        stop = _lookup_naptan_stop(naptan_stops, stop_id)
+        if stop is None:
+            warnings.warn(
+                "Did not find a NaPTAN stop for '%s'" % stop_id,
+                UserWarning,
+                stacklevel=2,
+            )
+            continue
+        rows.append(stop)
 
-        if len(stop) == 0:
-            # Try first to refresh the Stop data
-            _update_naptan_data()
-            naptan_stops = read_naptan_stops()
-            stop = naptan_stops.loc[naptan_stops[_stop_id_col] == stop_id]
-
-            # If it could still not be found warn and skip
-            if len(stop) == 0:
-                warnings.warn("Did not find a NaPTAN stop for '%s'" % stop_id,
-                              UserWarning,
-                              stacklevel=2)
-                continue
-
-        elif len(stop) > 1:
-            raise ValueError("Had more than 1 stop with identical stop reference.")
-
-        # Add to container
-        stop_data = stop_data.append(stop, ignore_index=True, sort=False)
-
-    return stop_data
+    return pd.DataFrame(rows, columns=_stop_columns)
 
 
 def get_stops(data):
     """Parse stop data from TransXchange elements"""
+    naptan_stops = read_naptan_stops()
 
-    if 'StopPoint' in data.TransXChange.StopPoints.__dir__():
-        stop_data = _get_tfl_style_stops(data)
-    elif 'AnnotatedStopPointRef' in data.TransXChange.StopPoints.__dir__():
-        stop_data = _get_txc_21_style_stops(data)
+    if "StopPoint" in data.TransXChange.StopPoints.__dir__():
+        stop_data = _get_tfl_style_stops(data, naptan_stops)
+    elif "AnnotatedStopPointRef" in data.TransXChange.StopPoints.__dir__():
+        stop_data = _get_txc_21_style_stops(data, naptan_stops)
     else:
         raise ValueError(
-            "Did not find tag for Stop data in TransXchange xml. " 
+            "Did not find tag for Stop data in TransXchange xml. "
             "Could not parse Stop information from the TransXchange."
         )
 

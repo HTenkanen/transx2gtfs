@@ -1,5 +1,22 @@
 import pandas as pd
 
+WEEKDAYS = [
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+]
+
+
+def _weekday_names(days_of_week_element):
+    weekdays = [elem._name for elem in days_of_week_element.get_elements()]
+    if len(weekdays) == 1:
+        return weekdays[0]
+    return "|".join(weekdays)
+
 
 def get_service_operative_days_info(data):
     """
@@ -8,15 +25,9 @@ def get_service_operative_days_info(data):
     This is used if VehicleJourney does not contain the information.
     """
     try:
-        reg_weekdays = data.TransXChange.Services.Service.OperatingProfile.RegularDayType.DaysOfWeek.get_elements()
-        weekdays = []
-        for elem in reg_weekdays:
-            weekdays.append(elem._name)
-        if len(weekdays) == 1:
-            return weekdays[0]
-        else:
-            return "|".join(weekdays)
-    except:
+        service = data.TransXChange.Services.Service
+        return _weekday_names(service.OperatingProfile.RegularDayType.DaysOfWeek)
+    except Exception:
         # If service does not have OperatingProfile available, return None
         return None
 
@@ -25,31 +36,18 @@ def get_weekday_info(vehicle_journey_element):
     """Parses weekday info from TransXChange VehicleJourney element"""
     j = vehicle_journey_element
     try:
-        reg_weekdays = j.OperatingProfile.RegularDayType.DaysOfWeek.get_elements()
-        weekdays = []
-        for elem in reg_weekdays:
-            weekdays.append(elem._name)
-        if len(weekdays) == 1:
-            return weekdays[0]
-        else:
-            return "|".join(weekdays)
-    except:
+        return _weekday_names(j.OperatingProfile.RegularDayType.DaysOfWeek)
+    except Exception:
         # If journey does not have OperatingProfile available, return None
         return None
 
-def parse_day_range(dayinfo):
-    """Parse day range from TransXChange DayOfWeek element"""
-    # Converters
-    weekday_to_num = {'monday': 0, 'tuesday': 1, 'wednesday': 2,
-                      'thursday': 3, 'friday': 4, 'saturday': 5,
-                      'sunday': 6}
-    num_to_weekday = {0: 'monday', 1: 'tuesday', 2: 'wednesday',
-                      3: 'thursday', 4: 'friday', 5: 'saturday',
-                      6: 'sunday'}
+
+def parse_active_days(dayinfo):
+    """Parse a TransXChange DaysOfWeek value into a {weekday: 0/1} dict"""
+    weekday_to_num = {day: i for i, day in enumerate(WEEKDAYS)}
 
     # Containers
     active_days = []
-    day_info = pd.DataFrame()
 
     # Process 'weekend'
     if "weekend" in dayinfo.strip().lower():
@@ -58,7 +56,7 @@ def parse_day_range(dayinfo):
 
     # Check if dayinfo is specified as day-range
     elif "To" in dayinfo:
-        day_range = dayinfo.split('To')
+        day_range = dayinfo.split("To")
         start_i = weekday_to_num[day_range[0].lower()]
         end_i = weekday_to_num[day_range[1].lower()]
 
@@ -69,7 +67,7 @@ def parse_day_range(dayinfo):
 
     # Process a collection of individual weekdays
     elif "|" in dayinfo:
-        days = dayinfo.split('|')
+        days = dayinfo.split("|")
         for day in days:
             active_days.append(weekday_to_num[day.lower()])
 
@@ -77,61 +75,35 @@ def parse_day_range(dayinfo):
     else:
         active_days.append(weekday_to_num[dayinfo.lower()])
 
-    # Generate calendar row
-    row = {}
-    # Create columns
-    for daynum in range(0, 7):
-        # Get day column
-        daycol = num_to_weekday[daynum]
+    return {day: int(i in active_days) for i, day in enumerate(WEEKDAYS)}
 
-        # Check if service is operative or not
-        if daynum in active_days:
-            active = 1
-        else:
-            active = 0
-        row[daycol] = active
 
-    # Generate DF
-    day_info = day_info.append(row, ignore_index=True, sort=False)
-    return day_info
+def parse_day_range(dayinfo):
+    """Parse day range from TransXChange DayOfWeek element into a one-row frame"""
+    return pd.DataFrame([parse_active_days(dayinfo)])
+
 
 def get_calendar(gtfs_info):
     """Parse calendar attributes from GTFS info DataFrame"""
     # Parse calendar
-    use_cols = ['service_id', 'weekdays', 'start_date', 'end_date']
+    use_cols = ["service_id", "weekdays", "start_date", "end_date"]
     calendar = gtfs_info.drop_duplicates(subset=use_cols)
     calendar = calendar[use_cols].copy()
     calendar = calendar.reset_index(drop=True)
 
-    # Container for final results
-    gtfs_calendar = pd.DataFrame()
+    rows = []
+    for _, row in calendar.iterrows():
+        dayrow = {"service_id": row["service_id"]}
+        dayrow.update(parse_active_days(row["weekdays"]))
+        dayrow["start_date"] = row["start_date"]
+        dayrow["end_date"] = row["end_date"]
+        rows.append(dayrow)
 
-    # Parse weekday columns
-    for idx, row in calendar.iterrows():
-        # Get dayinfo
-        dayinfo = row['weekdays']
-
-        # Parse day information
-        dayrow = parse_day_range(dayinfo)
-
-        # Add service and operation range info
-        dayrow['service_id'] = row['service_id']
-        dayrow['start_date'] = row['start_date']
-        dayrow['end_date'] = row['end_date']
-
-        # Add to container
-        gtfs_calendar = gtfs_calendar.append(dayrow, ignore_index=True, sort=False)
-
-    # Fix column order
-    col_order = ['service_id', 'monday', 'tuesday', 'wednesday',
-                 'thursday', 'friday', 'saturday', 'sunday',
-                 'start_date', 'end_date']
-    gtfs_calendar = gtfs_calendar[col_order].copy()
+    col_order = ["service_id"] + WEEKDAYS + ["start_date", "end_date"]
+    gtfs_calendar = pd.DataFrame(rows, columns=col_order)
 
     # Ensure correct datatypes
-    int_types = ['monday', 'tuesday', 'wednesday',
-                 'thursday', 'friday', 'saturday', 'sunday']
-    for col in int_types:
+    for col in WEEKDAYS:
         gtfs_calendar[col] = gtfs_calendar[col].astype(int)
 
     return gtfs_calendar

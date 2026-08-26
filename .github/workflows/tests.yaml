@@ -1,0 +1,50 @@
+name: Tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python linters
+        run: pip install black flake8 flake8-bugbear
+      - name: black
+        run: black --check transx2gtfs tests
+      - name: flake8
+        run: flake8 transx2gtfs tests
+
+  test:
+    needs: lint
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["310", "311", "312", "313", "314"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: ci/py${{ matrix.python }}-conda.yaml
+          environment-name: test
+          condarc: |
+            channel_priority: strict
+      - name: Install transx2gtfs
+        shell: bash -el {0}
+        run: pip install -e . --no-deps
+      - name: Run tests
+        shell: bash -el {0}
+        run: pytest --cov=transx2gtfs --cov-report=term-missing
