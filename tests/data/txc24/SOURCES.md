@@ -1,6 +1,7 @@
 # Test fixture sources
 
-All files are real TransXChange documents; they are used unmodified except where noted.
+The files are stored together in `fixtures.zip` (the converter and the tests read zip
+members directly). All are real TransXChange documents, used unmodified except where noted.
 
 ## SVRABAO001.xml
 
