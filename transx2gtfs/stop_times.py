@@ -1,3 +1,7 @@
+import hashlib
+
+import pandas as pd
+
 DIRECTIONS = {
     "inbound": 0,
     "outbound": 1,
@@ -47,34 +51,37 @@ def get_stop_times(gtfs_info):
     return stop_times[stops_per_trip > 1].reset_index(drop=True)
 
 
+def make_service_id(service_ref, start_date, end_date, weekdays, exceptions):
+    """
+    service_id of a calendar: '<service>_<start>_<end>_<weekdays>', with a short
+    hash of the encoded exceptions appended when the calendar has exceptions.
+    """
+    service_id = "%s_%s_%s_%s" % (service_ref, start_date, end_date, weekdays)
+    if exceptions:
+        service_id = "%s_%s" % (service_id, exceptions_digest(exceptions))
+    return service_id
+
+
+def exceptions_digest(exceptions):
+    """Short stable hash of an encoded exception list"""
+    return hashlib.sha1(exceptions.encode("utf-8")).hexdigest()[:8]
+
+
 def generate_service_id(stop_times):
     """Generate service_id into stop_times DataFrame"""
-
-    # Create column for service_id
-    stop_times["service_id"] = None
-
-    # Parse calendar info
-    calendar_info = stop_times.drop_duplicates(subset=["vehicle_journey_id"])
-
-    # Group by weekdays
-    calendar_groups = calendar_info.groupby("weekdays")
-
-    # Iterate over groups and create a service_id
-    for _, cgroup in calendar_groups:
-        # Parse all vehicle journey ids
-        vehicle_journey_ids = cgroup["vehicle_journey_id"].to_list()
-
-        # Parse other items
-        service_ref = cgroup["service_ref"].unique()[0]
-        daygroup = cgroup["weekdays"].unique()[0]
-        start_d = cgroup["start_date"].unique()[0]
-        end_d = cgroup["end_date"].unique()[0]
-
-        # Generate service_id
-        service_id = "%s_%s_%s_%s" % (service_ref, start_d, end_d, daygroup)
-
-        # Update stop_times service_id
-        stop_times.loc[
-            stop_times["vehicle_journey_id"].isin(vehicle_journey_ids), "service_id"
-        ] = service_id
+    exceptions = (
+        stop_times["exceptions"]
+        if "exceptions" in stop_times.columns
+        else pd.Series("", index=stop_times.index)
+    )
+    stop_times["service_id"] = [
+        make_service_id(service_ref, start, end, weekdays, exc)
+        for service_ref, start, end, weekdays, exc in zip(
+            stop_times["service_ref"],
+            stop_times["start_date"],
+            stop_times["end_date"],
+            stop_times["weekdays"],
+            exceptions.fillna(""),
+        )
+    ]
     return stop_times

@@ -1,8 +1,11 @@
 """Tests for TransXChange 2.4/2.5 conversion, on documents built from parts."""
 
+import warnings
+
 import pytest
 
 from transx2gtfs.agency import get_agency
+from transx2gtfs.bank_holidays import detect_division
 from transx2gtfs.calendar import get_calendar, parse_active_days
 from transx2gtfs.calendar_dates import get_calendar_dates
 from transx2gtfs.routes import get_routes
@@ -136,6 +139,17 @@ def profile(days="<MondayToFriday />", bank_holidays="", special_days="", servic
     )
 
 
+def bh(operation="", non_operation=""):
+    return "<BankHolidayOperation>%s%s</BankHolidayOperation>" % (
+        "<DaysOfOperation>%s</DaysOfOperation>" % operation if operation else "",
+        (
+            "<DaysOfNonOperation>%s</DaysOfNonOperation>" % non_operation
+            if non_operation
+            else ""
+        ),
+    )
+
+
 def tables(xml):
     doc = read_txc(xml)
     info = get_gtfs_info(doc)
@@ -149,6 +163,12 @@ def tables(xml):
         agency=get_agency(doc),
         doc=doc,
     )
+
+
+def exception_dates(calendar_dates, kind):
+    if calendar_dates is None:
+        return set()
+    return set(calendar_dates.loc[calendar_dates["exception_type"] == kind, "date"])
 
 
 # Services ----------------------------------------------------------------------
@@ -290,24 +310,257 @@ def test_unknown_day_pattern_raises():
         parse_active_days("Someday")
 
 
-def test_journey_without_days_runs_every_day():
+def test_journey_without_days_runs_every_day_and_holidays_only_runs_on_holidays():
     t = tables(document(journeys=[journey("VJ_1", profile="")]))
     assert t["calendar"].iloc[0][["monday", "sunday"]].to_list() == [1, 1]
     assert t["trips"]["service_id"].to_list() == ["S1_20270104_20270331_MondayToSunday"]
     # the service profile is used when the journey has none
     t = tables(document(service_profile=profile("<Saturday />")))
     assert t["calendar"].iloc[0][["saturday", "sunday"]].to_list() == [1, 0]
-    # HolidaysOnly is a day pattern without weekdays
+
+    holidays_only = journey(
+        "VJ_1",
+        profile="<OperatingProfile><RegularDayType><HolidaysOnly /></RegularDayType>"
+        "</OperatingProfile>",
+    )
+    t = tables(document(journeys=[holidays_only]))
+    assert (
+        t["calendar"]["service_id"]
+        .iloc[0]
+        .startswith("S1_20270104_20270331_HolidaysOnly_")
+    )
+    assert t["calendar"].iloc[0][["monday", "saturday"]].to_list() == [0, 0]
+    # runs exactly on the bank holidays of the period (Good Friday, Easter Monday)
+    assert exception_dates(t["calendar_dates"], 1) == {"20270326", "20270329"}
+
+    weekend_and_holidays = journey(
+        "VJ_1", profile=profile("<SaturdaySundayHolidaysOnly />")
+    )
+    t = tables(document(journeys=[weekend_and_holidays]))
+    assert t["calendar"].iloc[0][["friday", "saturday", "sunday"]].to_list() == [
+        0,
+        1,
+        1,
+    ]
+    assert exception_dates(t["calendar_dates"], 1) == {"20270326", "20270329"}
+
+    # explicit removals win: HolidaysOnly minus all holidays never runs
+    never = journey(
+        "VJ_1",
+        profile=profile(
+            "<HolidaysOnly />", bank_holidays=bh(non_operation="<AllBankHolidays />")
+        ),
+    )
+    assert tables(document(journeys=[never]))["calendar_dates"] is None
+
+
+def test_bank_holiday_exceptions_and_precedence():
+    # Good Friday 2027-03-26 (Friday, inside MondayToFriday) is removed; Easter
+    # Monday 2027-03-29 likewise; a Saturday holiday would be added
     t = tables(
         document(
             journeys=[
                 journey(
                     "VJ_1",
-                    profile="<OperatingProfile><RegularDayType><HolidaysOnly />"
-                    "</RegularDayType></OperatingProfile>",
+                    profile=profile(
+                        bank_holidays=bh(non_operation="<GoodFriday /><EasterMonday />")
+                    ),
                 )
             ]
         )
     )
-    assert t["calendar"].iloc[0][["monday", "sunday"]].to_list() == [0, 0]
-    assert t["trips"]["service_id"].to_list() == ["S1_20270104_20270331_HolidaysOnly"]
+    assert exception_dates(t["calendar_dates"], 2) == {"20270326", "20270329"}
+    assert (
+        t["calendar"]["service_id"]
+        .iloc[0]
+        .startswith("S1_20270104_20270331_MondayToFriday_")
+    )
+
+    weekend = journey(
+        "VJ_1",
+        profile=profile(
+            "<Weekend />", bank_holidays=bh(operation="<AllBankHolidays />")
+        ),
+    )
+    t = tables(document(journeys=[weekend]))
+    assert exception_dates(t["calendar_dates"], 1) == {"20270326", "20270329"}
+
+    both = journey(
+        "VJ_1",
+        profile=profile(
+            "<Weekend />",
+            bank_holidays=bh(
+                operation="<GoodFriday />", non_operation="<GoodFriday />"
+            ),
+        ),
+    )
+    assert (
+        tables(document(journeys=[both]))["calendar_dates"] is None
+    )  # cancellation wins
+
+    other = journey(
+        "VJ_1",
+        profile=profile(
+            "<Weekend />",
+            bank_holidays=bh(
+                operation=(
+                    "<OtherPublicHoliday><Description>Local</Description>"
+                    "<Date>2027-02-03</Date></OtherPublicHoliday>"
+                )
+            ),
+        ),
+    )
+    assert exception_dates(tables(document(journeys=[other]))["calendar_dates"], 1) == {
+        "20270203"
+    }
+
+    with pytest.warns(
+        UserWarning, match="Did not recognize following holiday: Whitsun"
+    ):
+        tables(
+            document(
+                journeys=[
+                    journey(
+                        "VJ_1",
+                        profile=profile(bank_holidays=bh(non_operation="<Whitsun />")),
+                    )
+                ]
+            )
+        )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        # a valid name without a date in the period is fine
+        tables(
+            document(
+                journeys=[
+                    journey(
+                        "VJ_1",
+                        profile=profile(
+                            bank_holidays=bh(non_operation="<ChristmasDayHoliday />")
+                        ),
+                    )
+                ]
+            )
+        )
+
+
+def test_journey_profile_inherits_bank_holidays_from_the_service():
+    # the journey sets its days only; the service's bank-holiday rule still applies
+    service_profile = profile(bank_holidays=bh(non_operation="<AllBankHolidays />"))
+    t = tables(
+        document(
+            service_profile=service_profile,
+            journeys=[journey("VJ_1", profile=profile("<MondayToSunday />"))],
+        )
+    )
+    assert exception_dates(t["calendar_dates"], 2) == {"20270326", "20270329"}
+    # each list is inherited on its own: a journey setting only DaysOfOperation
+    # keeps the service's DaysOfNonOperation
+    own = profile("<MondayToSunday />", bank_holidays=bh(operation="<GoodFriday />"))
+    t = tables(
+        document(
+            service_profile=service_profile, journeys=[journey("VJ_1", profile=own)]
+        )
+    )
+    assert exception_dates(t["calendar_dates"], 2) == {"20270326", "20270329"}
+    # a journey setting both lists overrides the service's
+    own = profile(
+        "<MondayToSunday />",
+        bank_holidays=bh(operation="<GoodFriday />", non_operation="<EasterMonday />"),
+    )
+    t = tables(
+        document(
+            service_profile=service_profile, journeys=[journey("VJ_1", profile=own)]
+        )
+    )
+    assert exception_dates(t["calendar_dates"], 2) == {"20270329"}
+
+
+def test_other_public_holidays_are_inherited_with_their_day_type():
+    local = (
+        "<OtherPublicHoliday><Description>Local</Description>"
+        "<Date>2027-02-03</Date></OtherPublicHoliday>"
+    )
+    service_profile = profile(bank_holidays=bh(operation=local))
+    t = tables(
+        document(
+            service_profile=service_profile,
+            journeys=[journey("VJ_1", profile=profile("<Weekend />"))],
+        )
+    )
+    assert exception_dates(t["calendar_dates"], 1) == {"20270203"}
+    # a journey with its own DaysOfOperation does not inherit the service's dates
+    own = profile("<Weekend />", bank_holidays=bh(operation="<GoodFriday />"))
+    t = tables(
+        document(
+            service_profile=service_profile, journeys=[journey("VJ_1", profile=own)]
+        )
+    )
+    assert exception_dates(t["calendar_dates"], 1) == {"20270326"}
+
+
+def test_scottish_documents_use_the_scottish_calendar():
+    scottish = document(links=(("639003662", "639003652", "PT5M"),))
+    assert detect_division(read_txc(scottish)) == "scotland"
+    assert detect_division(read_txc(document())) == "england-and-wales"
+    # 2027-08-02 is the Scottish summer holiday (a Monday inside MondayToFriday)
+    t = tables(
+        document(
+            links=(("639003662", "639003652", "PT5M"),),
+            operating_period="<StartDate>2027-07-01</StartDate><EndDate>2027-09-30</EndDate>",
+            journeys=[
+                journey(
+                    "VJ_1",
+                    profile=profile(
+                        bank_holidays=bh(non_operation="<AllBankHolidays />")
+                    ),
+                )
+            ],
+        )
+    )
+    assert exception_dates(t["calendar_dates"], 2) == {"20270802"}
+
+
+def test_other_public_holidays_count_only_inside_the_period():
+    outside = (
+        "<OtherPublicHoliday><Description>Far</Description><Date>2028-02-03</Date>"
+        "</OtherPublicHoliday>"
+    )
+    prof = profile("<Weekend />", bank_holidays=bh(operation=outside))
+    assert (
+        tables(document(journeys=[journey("VJ_1", profile=prof)]))["calendar_dates"]
+        is None
+    )
+
+
+def test_service_ids_distinguish_calendars_within_a_service():
+    plain = journey("VJ_1")
+    with_exception = journey(
+        "VJ_2",
+        departure="09:00:00",
+        profile=profile(
+            "<MondayToSunday />", bank_holidays=bh(non_operation="<GoodFriday />")
+        ),
+    )
+    t = tables(document(journeys=[plain, with_exception]))
+    ids = t["trips"]["service_id"].to_list()
+    assert ids[0] == "S1_20270104_20270331_MondayToSunday"
+    assert (
+        ids[1].startswith("S1_20270104_20270331_MondayToSunday_") and ids[1] != ids[0]
+    )
+    assert len(t["calendar"]) == 2
+    assert set(t["calendar_dates"]["service_id"]) == {ids[1]}
+
+
+def test_same_time_journeys_with_different_calendars_keep_separate_trips():
+    plain = journey("VJ_1")
+    school = journey(
+        "VJ_2",
+        profile=profile(
+            "<MondayToSunday />", bank_holidays=bh(non_operation="<GoodFriday />")
+        ),
+    )
+    t = tables(document(journeys=[plain, school]))
+    assert len(t["trips"]) == 2 and t["trips"]["trip_id"].is_unique
+    assert t["trips"]["trip_id"].iloc[0] == "JPS_1_MondayToSunday_0800"
+    assert t["trips"]["trip_id"].iloc[1].startswith("JPS_1_MondayToSunday_0800_")

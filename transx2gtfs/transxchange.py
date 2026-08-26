@@ -1,9 +1,18 @@
-import pandas as pd
+import dataclasses
 from datetime import datetime, timedelta, time
-from transx2gtfs.calendar import get_weekday_info
-from transx2gtfs.calendar_dates import get_calendar_dates_exceptions
-from transx2gtfs.stop_times import generate_service_id, get_direction
+
+import pandas as pd
+
+from transx2gtfs.bank_holidays import (
+    bank_holiday_table,
+    detect_division,
+    expand_bank_holiday_names,
+    read_bank_holidays,
+)
+from transx2gtfs.calendar import get_weekday_info, parse_active_days
+from transx2gtfs.calendar_dates import encode_exceptions
 from transx2gtfs.routes import get_mode
+from transx2gtfs.stop_times import exceptions_digest, generate_service_id, get_direction
 
 DEFAULT_WEEKDAYS = "MondayToSunday"
 OPERATING_PERIOD_DEFAULT_DAYS = 365
@@ -90,6 +99,109 @@ def get_midnight_formatted_times(
     return arrival_hour, departure_hour
 
 
+# Calendars
+# ---------
+
+
+class _Calendars:
+    """Bank holiday tables of a document, one per operating period"""
+
+    def __init__(self, doc):
+        self.division = detect_division(doc)
+        self._holidays = None
+        self._tables = {}
+
+    def table(self, start, end):
+        key = (start, end)
+        if key not in self._tables:
+            if self._holidays is None:
+                self._holidays = read_bank_holidays()
+            self._tables[key] = bank_holiday_table(
+                self.division, start, end, self._holidays
+            )
+        return self._tables[key]
+
+
+def _inherit_profile(profile, fallback):
+    """Fill missing day and bank holiday information from the service profile"""
+    if profile is None:
+        return fallback
+    if fallback is None:
+        return profile
+    changes = {}
+    if profile.days_of_week is None and not profile.holidays_only:
+        changes["days_of_week"] = fallback.days_of_week
+        changes["holidays_only"] = fallback.holidays_only
+    # A missing DaysOf(Non)Operation element is inherited as a whole: its
+    # holiday names and its OtherPublicHoliday dates
+    if profile.bank_holiday_days_of_operation is None:
+        changes["bank_holiday_days_of_operation"] = (
+            fallback.bank_holiday_days_of_operation
+        )
+        changes["other_public_holidays_of_operation"] = (
+            fallback.other_public_holidays_of_operation
+        )
+    if profile.bank_holiday_days_of_non_operation is None:
+        changes["bank_holiday_days_of_non_operation"] = (
+            fallback.bank_holiday_days_of_non_operation
+        )
+        changes["other_public_holidays_of_non_operation"] = (
+            fallback.other_public_holidays_of_non_operation
+        )
+    return dataclasses.replace(profile, **changes) if changes else profile
+
+
+def journey_calendar(calendars, profile, start, end):
+    """
+    Operating period, weekday pattern and exceptions of one journey.
+
+    Returns ``(start_date, end_date, weekdays, exceptions)`` with GTFS dates and
+    the encoded exceptions (bank holidays added on days outside the weekday
+    pattern, removed on days inside it; a removal wins over an addition).
+    """
+    weekdays = get_weekday_info(profile) or DEFAULT_WEEKDAYS
+    active = {i for i, on in enumerate(parse_active_days(weekdays).values()) if on}
+
+    added, removed = set(), set()
+    if profile is not None:
+        holidays_only = profile.holidays_only or any(
+            name.endswith("HolidaysOnly") for name in (profile.days_of_week or [])
+        )
+        if (
+            holidays_only
+            or profile.bank_holiday_days_of_operation
+            or profile.bank_holiday_days_of_non_operation
+        ):
+            table = calendars.table(start, end)
+            # HolidaysOnly / SaturdaySundayHolidaysOnly run on every bank holiday
+            if holidays_only:
+                added |= set(table["AllBankHolidays"])
+            added |= expand_bank_holiday_names(
+                profile.bank_holiday_days_of_operation, table
+            )
+            removed |= expand_bank_holiday_names(
+                profile.bank_holiday_days_of_non_operation, table
+            )
+        added |= {
+            parse_date(d)
+            for _, d in profile.other_public_holidays_of_operation
+            if d and start <= parse_date(d) <= end
+        }
+        removed |= {
+            parse_date(d)
+            for _, d in profile.other_public_holidays_of_non_operation
+            if d and start <= parse_date(d) <= end
+        }
+
+    type1 = {day for day in added if day not in removed and day.weekday() not in active}
+    type2 = {day for day in removed if day.weekday() in active}
+    return gtfs_date(start), gtfs_date(end), weekdays, encode_exceptions(type1, type2)
+
+
+# Main table
+# ----------
+
+
 def _service_profiles(doc):
     """OperatingProfile per service code, used when a journey has none"""
     return {service.code: service.operating_profile for service in doc.services}
@@ -103,8 +215,9 @@ def process_vehicle_journeys(doc, service_jp_info):
     # Number of journeys to process
     journey_cnt = len(vjourneys)
 
-    # Service-level operating profiles as fallback
+    # Service-level operating profiles as fallback, and the bank holidays
     service_profiles = _service_profiles(doc)
+    calendars = _Calendars(doc)
 
     # Container for gtfs_info rows
     rows = []
@@ -126,26 +239,19 @@ def process_vehicle_journeys(doc, service_jp_info):
         # Journey pattern reference
         journey_pattern_id = journey.journey_pattern_ref
 
-        # Vehicle journey id ==> will be used to generate service_id
-        # (identifies operative weekdays)
+        # Vehicle journey id (part of multi-section trip ids)
         vehicle_journey_id = journey.code
 
-        # Operating profile of the journey, falling back to its service's
         if service_ref not in service_profiles:
             raise ValueError(
                 "VehicleJourney '%s' refers to unknown Service '%s'."
                 % (vehicle_journey_id, service_ref)
             )
-        service_profile = service_profiles[service_ref]
 
-        # A journey without any day information runs every day
-        weekdays = get_weekday_info(journey.operating_profile)
-        if weekdays is None:
-            weekdays = get_weekday_info(service_profile) or DEFAULT_WEEKDAYS
-
-        non_operative_days = get_calendar_dates_exceptions(journey.operating_profile)
-        if non_operative_days is None:
-            non_operative_days = get_calendar_dates_exceptions(service_profile)
+        # Operating profile of the journey, completed from its service's
+        profile = _inherit_profile(
+            journey.operating_profile, service_profiles[service_ref]
+        )
 
         # Select service journey patterns for given service id
         service_journey_patterns = service_jp_info.loc[
@@ -194,6 +300,14 @@ def process_vehicle_journeys(doc, service_jp_info):
         direction_id = int(direction_id)
         travel_mode = int(travel_mode)
 
+        # Operating period, weekdays and exceptions of the journey
+        start_date, end_date, weekdays, exceptions = journey_calendar(
+            calendars,
+            profile,
+            datetime.strptime(start_date, "%Y%m%d").date(),
+            datetime.strptime(end_date, "%Y%m%d").date(),
+        )
+
         # Get departure time
         departure_time = journey.departure_time
         hour, minute, second = departure_time.split(":")
@@ -216,7 +330,7 @@ def process_vehicle_journeys(doc, service_jp_info):
             start_date=start_date,
             end_date=end_date,
             weekdays=weekdays,
-            non_operative_days=non_operative_days,
+            exceptions=exceptions,
         )
 
         if not sections:
@@ -233,6 +347,10 @@ def process_vehicle_journeys(doc, service_jp_info):
                 str(hour).zfill(2),
                 str(minute).zfill(2),
             )
+            # Journeys at the same time with different exception calendars
+            # must not share a trip
+            if exceptions:
+                trip_id = "%s_%s" % (trip_id, exceptions_digest(exceptions))
         else:
             trip_id = "%s_%s" % (service_ref, vehicle_journey_id)
 

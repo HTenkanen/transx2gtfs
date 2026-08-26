@@ -98,7 +98,7 @@ def get_calendar(gtfs_info):
     """Parse calendar attributes from GTFS info DataFrame"""
     # Parse calendar
     use_cols = ["service_id", "weekdays", "start_date", "end_date"]
-    calendar = gtfs_info.drop_duplicates(subset=use_cols)
+    calendar = gtfs_info.drop_duplicates(subset=["service_id"])
     calendar = calendar[use_cols].copy()
     calendar = calendar.reset_index(drop=True)
 
