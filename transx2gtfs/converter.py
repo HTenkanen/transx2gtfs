@@ -50,7 +50,11 @@ from transx2gtfs.agency import get_agency
 from transx2gtfs.calendar import get_calendar
 from transx2gtfs.calendar_dates import get_calendar_dates
 from transx2gtfs.dataio import generate_gtfs_export, save_to_gtfs_zip, get_xml_paths
-from transx2gtfs.dataio import read_xml_inside_nested_zip, read_xml_inside_zip, read_unpacked_xml
+from transx2gtfs.dataio import (
+    read_xml_inside_nested_zip,
+    read_xml_inside_zip,
+    read_unpacked_xml,
+)
 from transx2gtfs.transxchange import get_gtfs_info
 from transx2gtfs.distribute import create_workers
 
@@ -76,7 +80,6 @@ def process_files(parallel):
             if isinstance(list(path.values())[0], str):
                 data, file_size, xml_name = read_xml_inside_zip(path)
 
-
             # If the type of value is a dictionary the xml-file
             # is in a ZipFile which is inside another ZipFile.
             # In such cases, the path stucture is:
@@ -94,7 +97,9 @@ def process_files(parallel):
             continue
 
         print("=================================================================")
-        print("[%s / %s] Processing TransXChange file: %s" % (idx, len(files), xml_name))
+        print(
+            "[%s / %s] Processing TransXChange file: %s" % (idx, len(files), xml_name)
+        )
         print("Size: %s MB" % size)
         # Log start time
         start_t = timeit()
@@ -132,19 +137,23 @@ def process_files(parallel):
 
         # Only export data into db if there exists valid stop_times data
         if len(stop_times) > 0:
-            stop_times.to_sql(name='stop_times', con=conn, index=False, if_exists='append')
-            stop_data.to_sql(name='stops', con=conn, index=False, if_exists='append')
-            routes.to_sql(name='routes', con=conn, index=False, if_exists='append')
-            agency.to_sql(name='agency', con=conn, index=False, if_exists='append')
-            trips.to_sql(name='trips', con=conn, index=False, if_exists='append')
-            calendar.to_sql(name='calendar', con=conn, index=False, if_exists='append')
+            stop_times.to_sql(
+                name="stop_times", con=conn, index=False, if_exists="append"
+            )
+            stop_data.to_sql(name="stops", con=conn, index=False, if_exists="append")
+            routes.to_sql(name="routes", con=conn, index=False, if_exists="append")
+            agency.to_sql(name="agency", con=conn, index=False, if_exists="append")
+            trips.to_sql(name="trips", con=conn, index=False, if_exists="append")
+            calendar.to_sql(name="calendar", con=conn, index=False, if_exists="append")
 
             if calendar_dates is not None:
-                calendar_dates.to_sql(name='calendar_dates', con=conn, index=False, if_exists='append')
+                calendar_dates.to_sql(
+                    name="calendar_dates", con=conn, index=False, if_exists="append"
+                )
         else:
             print(
-                "UserWarning: File %s did not contain valid stop_sequence data, skipping." % (
-                    xml_name)
+                "UserWarning: File %s did not contain valid stop_sequence data, skipping."
+                % (xml_name)
             )
 
         # Close connection
@@ -161,8 +170,13 @@ def process_files(parallel):
         # ===================
 
 
-def convert(input_filepath, output_filepath, append_to_existing=False, worker_cnt=None,
-            file_size_limit=2000):
+def convert(
+    input_filepath,
+    output_filepath,
+    append_to_existing=False,
+    worker_cnt=None,
+    file_size_limit=2000,
+):
     """
     Converts TransXchange formatted schedule data into GTFS feed.
 
@@ -200,9 +214,12 @@ def convert(input_filepath, output_filepath, append_to_existing=False, worker_cn
     print("Populating database ..")
 
     # Create workers
-    workers = create_workers(input_files=files, worker_cnt=worker_cnt,
-                             file_size_limit=file_size_limit,
-                             gtfs_db=gtfs_db)
+    workers = create_workers(
+        input_files=files,
+        worker_cnt=worker_cnt,
+        file_size_limit=file_size_limit,
+        gtfs_db=gtfs_db,
+    )
 
     # Create Pool
     pool = multiprocessing.Pool()

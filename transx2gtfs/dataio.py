@@ -17,17 +17,17 @@ def get_paths_from_zip(zip_filepath):
     files_in_zip = z.namelist()
 
     for name in files_in_zip:
-        if name.endswith('xml'):
+        if name.endswith("xml"):
             # Create dictionary with name as key and zip filepath value
             xml_contents.append({name: z.filename})
 
         # If the zip contained another zip take it's contents
-        elif name.endswith('.zip'):
+        elif name.endswith(".zip"):
             # Read inner zip to memory
             inner_zip = ZipFile(io.BytesIO(z.read(name)))
             # Read files from inner zip
             for inner_name in inner_zip.namelist():
-                if inner_name.endswith('xml'):
+                if inner_name.endswith("xml"):
                     xml_contents.append({z.filename: {name: inner_name}})
     return xml_contents
 
@@ -45,8 +45,8 @@ def get_xml_paths(filepath):
     # ------------------
     if os.path.isdir(filepath):
         # Read all XML and zip files
-        xml_contents = glob.glob(os.path.join(filepath, '*.xml'))
-        zip_contents = glob.glob(os.path.join(filepath, '*.zip'))
+        xml_contents = glob.glob(os.path.join(filepath, "*.xml"))
+        zip_contents = glob.glob(os.path.join(filepath, "*.zip"))
 
         # Parse xml references inside zip files
         if len(zip_contents) > 0:
@@ -54,10 +54,11 @@ def get_xml_paths(filepath):
                 xml_contents += get_paths_from_zip(zfp)
 
     # Input is a ZipFile
-    elif filepath.endswith('.zip'):
+    elif filepath.endswith(".zip"):
         xml_contents = get_paths_from_zip(filepath)
 
     return xml_contents
+
 
 def read_unpacked_xml(xml_path):
     """
@@ -67,6 +68,7 @@ def read_unpacked_xml(xml_path):
     parsed_xml = untangle.parse(xml_path)
     return parsed_xml, file_size, os.path.basename(xml_path)
 
+
 def read_xml_inside_zip(xml_path):
     """
     Reads an XML with untangle which is inside a ZipFile.
@@ -75,13 +77,7 @@ def read_xml_inside_zip(xml_path):
     filename = list(xml_path.keys())[0]
     z = ZipFile(zip_filepath)
     file_size = z.getinfo(filename).file_size
-    parsed_xml = untangle.parse(
-        io.TextIOWrapper(
-            io.BytesIO(
-                z.read(filename)
-            )
-        )
-    )
+    parsed_xml = untangle.parse(io.TextIOWrapper(io.BytesIO(z.read(filename))))
     return parsed_xml, file_size, filename
 
 
@@ -100,13 +96,7 @@ def read_xml_inside_nested_zip(xml_path):
     # Read inner zip to memory
     inner_zip = ZipFile(io.BytesIO(z.read(inner_zip_name)))
     file_size = inner_zip.getinfo(xml_name).file_size
-    parsed_xml = untangle.parse(
-        io.TextIOWrapper(
-            io.BytesIO(
-                inner_zip.read(xml_name)
-            )
-        )
-    )
+    parsed_xml = untangle.parse(io.TextIOWrapper(io.BytesIO(inner_zip.read(xml_name))))
     return parsed_xml, file_size, xml_name
 
 
@@ -121,42 +111,42 @@ def generate_gtfs_export(gtfs_db_fp):
     # Stops
     # -----
     stops = pd.read_sql_query("SELECT * FROM stops", conn)
-    if 'index' in stops.columns:
-        stops = stops.drop('index', axis=1)
+    if "index" in stops.columns:
+        stops = stops.drop("index", axis=1)
 
     # Drop duplicates based on stop_id
-    stops = stops.drop_duplicates(subset=['stop_id'])
+    stops = stops.drop_duplicates(subset=["stop_id"])
 
     # Agency
     # ------
     agency = pd.read_sql_query("SELECT * FROM agency", conn)
-    if 'index' in agency.columns:
-        agency = agency.drop('index', axis=1)
+    if "index" in agency.columns:
+        agency = agency.drop("index", axis=1)
     # Drop duplicates
-    agency = agency.drop_duplicates(subset=['agency_id'])
+    agency = agency.drop_duplicates(subset=["agency_id"])
 
     # Routes
     # ------
     routes = pd.read_sql_query("SELECT * FROM routes", conn)
-    if 'index' in routes.columns:
-        routes = routes.drop('index', axis=1)
+    if "index" in routes.columns:
+        routes = routes.drop("index", axis=1)
     # Drop duplicates
-    routes = routes.drop_duplicates(subset=['route_id'])
+    routes = routes.drop_duplicates(subset=["route_id"])
 
     # Trips
     # -----
     trips = pd.read_sql_query("SELECT * FROM trips", conn)
-    if 'index' in trips.columns:
-        trips = trips.drop('index', axis=1)
+    if "index" in trips.columns:
+        trips = trips.drop("index", axis=1)
 
     # Drop duplicates
-    trips = trips.drop_duplicates(subset=['trip_id'])
+    trips = trips.drop_duplicates(subset=["trip_id"])
 
     # Stop_times
     # ----------
     stop_times = pd.read_sql_query("SELECT * FROM stop_times", conn)
-    if 'index' in stop_times.columns:
-        stop_times = stop_times.drop('index', axis=1)
+    if "index" in stop_times.columns:
+        stop_times = stop_times.drop("index", axis=1)
 
     # Drop duplicates
     stop_times = stop_times.drop_duplicates()
@@ -164,19 +154,19 @@ def generate_gtfs_export(gtfs_db_fp):
     # Calendar
     # --------
     calendar = pd.read_sql_query("SELECT * FROM calendar", conn)
-    if 'index' in calendar.columns:
-        calendar = calendar.drop('index', axis=1)
+    if "index" in calendar.columns:
+        calendar = calendar.drop("index", axis=1)
     # Drop duplicates
-    calendar = calendar.drop_duplicates(subset=['service_id'])
+    calendar = calendar.drop_duplicates(subset=["service_id"])
 
     # Calendar dates
     # --------------
     try:
         calendar_dates = pd.read_sql_query("SELECT * FROM calendar_dates", conn)
-        if 'index' in calendar_dates.columns:
-            calendar_dates = calendar_dates.drop('index', axis=1)
+        if "index" in calendar_dates.columns:
+            calendar_dates = calendar_dates.drop("index", axis=1)
         # Drop duplicates
-        calendar_dates = calendar_dates.drop_duplicates(subset=['service_id'])
+        calendar_dates = calendar_dates.drop_duplicates(subset=["service_id"])
     except:
         # If data is not available pass empty DataFrame
         calendar_dates = pd.DataFrame()
@@ -189,7 +179,8 @@ def generate_gtfs_export(gtfs_db_fp):
         routes=routes.copy(),
         stops=stops.copy(),
         stop_times=stop_times.copy(),
-        trips=trips.copy())
+        trips=trips.copy(),
+    )
 
     # Close connection
     conn.close()
@@ -214,7 +205,7 @@ def save_to_gtfs_zip(output_zip_fp, gtfs_data):
     _quote_attributes = ["stop_name", "stop_desc", "trip_headsign"]
 
     # Open stream
-    with ZipFile(output_zip_fp, 'w') as zf:
+    with ZipFile(output_zip_fp, "w") as zf:
         for name, data in gtfs_data.items():
             fname = "{filename}.txt".format(filename=name)
 
@@ -222,9 +213,13 @@ def save_to_gtfs_zip(output_zip_fp, gtfs_data):
                 if len(data) > 0:
                     print("Exporting:", fname)
                     # Save
-                    buffer = data.to_csv(None, sep=',', index=False,
-                                         quotechar='"',
-                                         quoting=csv.QUOTE_NONNUMERIC)
+                    buffer = data.to_csv(
+                        None,
+                        sep=",",
+                        index=False,
+                        quotechar='"',
+                        quoting=csv.QUOTE_NONNUMERIC,
+                    )
 
                     zf.writestr(fname, buffer, compress_type=ZIP_DEFLATED)
                 else:

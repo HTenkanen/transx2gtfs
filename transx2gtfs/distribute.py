@@ -1,6 +1,7 @@
 import math
 from multiprocessing import cpu_count
 
+
 class Parallel:
     def __init__(self, input_files, file_size_limit, gtfs_db):
         self.input_files = input_files
@@ -13,14 +14,16 @@ def create_workers(input_files, worker_cnt=None, gtfs_db=None, file_size_limit=1
 
     # Distribute the process into all cores
     if worker_cnt is not None and isinstance(worker_cnt, int):
-        core_cnt=worker_cnt
+        core_cnt = worker_cnt
     elif worker_cnt is None:
-        if cpu_count()==1:
+        if cpu_count() == 1:
             core_cnt = cpu_count()
         else:
-            core_cnt = cpu_count()-1
+            core_cnt = cpu_count() - 1
     else:
-        assert isinstance(worker_cnt, int), "The number of workers should be passed as an integer value."
+        assert isinstance(
+            worker_cnt, int
+        ), "The number of workers should be passed as an integer value."
 
     # File count
     file_cnt = len(input_files)
@@ -42,8 +45,11 @@ def create_workers(input_files, worker_cnt=None, gtfs_db=None, file_size_limit=1
             # Slice the list
             selection = input_files[start_i:end_i]
 
-        workers.append(Parallel(input_files=selection, file_size_limit=file_size_limit,
-                                gtfs_db=gtfs_db))
+        workers.append(
+            Parallel(
+                input_files=selection, file_size_limit=file_size_limit, gtfs_db=gtfs_db
+            )
+        )
 
         # Update indices
         start_i += batch_size

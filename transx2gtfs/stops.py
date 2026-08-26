@@ -8,11 +8,12 @@ from zipfile import ZipFile
 import tempfile
 
 
-def _update_naptan_data(url="http://naptan.app.dft.gov.uk/DataRequest/Naptan.ashx?format=csv",
-                       filepath=None):
+def _update_naptan_data(
+    url="http://naptan.app.dft.gov.uk/DataRequest/Naptan.ashx?format=csv", filepath=None
+):
     if filepath is None:
         temp_dir = tempfile.gettempdir()
-        target_dir = os.path.join(temp_dir, 'transx2gtfs')
+        target_dir = os.path.join(temp_dir, "transx2gtfs")
         target_file = os.path.join(target_dir, "NaPTAN_data.zip")
 
         if not os.path.exists(target_dir):
@@ -34,9 +35,9 @@ def read_naptan_stops(naptan_fp=None):
     Reads NaPTAN stops from temp. If the Stops do not exist in the temp, downloads the data.
     """
     if naptan_fp is None:
-        naptan_fp = os.path.join(tempfile.gettempdir(),
-                                 'transx2gtfs',
-                                 'NaPTAN_data.zip')
+        naptan_fp = os.path.join(
+            tempfile.gettempdir(), "transx2gtfs", "NaPTAN_data.zip"
+        )
 
     max_attemps = 20
     i = 1
@@ -53,27 +54,31 @@ def read_naptan_stops(naptan_fp=None):
     # Read the stops from the zip
     z = ZipFile(naptan_fp)
 
-    if 'Stops.csv' not in z.namelist():
+    if "Stops.csv" not in z.namelist():
         raise ValueError("NaPTAN dataset did not contain stops!")
 
-    stops = pd.read_csv(io.BytesIO(z.read('Stops.csv')), encoding='latin1',
-                        low_memory=False)
+    stops = pd.read_csv(
+        io.BytesIO(z.read("Stops.csv")), encoding="latin1", low_memory=False
+    )
 
     # Rename required columns into GTFS format
-    stops = stops.rename(columns={
-        'ATCOCode': 'stop_id',
-        'Longitude': 'stop_lon',
-        'Latitude': 'stop_lat',
-        'CommonName': 'stop_name',
-    })
+    stops = stops.rename(
+        columns={
+            "ATCOCode": "stop_id",
+            "Longitude": "stop_lon",
+            "Latitude": "stop_lat",
+            "CommonName": "stop_name",
+        }
+    )
 
     # Keep only required columns
-    required_cols = ['stop_id', 'stop_lon', 'stop_lat', 'stop_name']
+    required_cols = ["stop_id", "stop_lon", "stop_lat", "stop_name"]
     for col in required_cols:
         if col not in stops.columns:
             raise ValueError(
                 "Required column {col} could not be found from stops DataFrame.".format(
-                col=col)
+                    col=col
+                )
             )
     stops = stops[required_cols].copy()
     return stops
@@ -86,10 +91,11 @@ def _get_tfl_style_stops(data):
     # The .srs here returns the Proj4-string presentation of the projection
     wgs84 = pyproj.Proj("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs")
     osgb36 = pyproj.Proj(
-        "+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.999601 +x_0=400000 +y_0=-100000 +ellps=airy +towgs84=446.448,-125.157,542.060,0.1502,0.2470,0.8421,-20.4894 +units=m +no_defs <>")
+        "+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.999601 +x_0=400000 +y_0=-100000 +ellps=airy +towgs84=446.448,-125.157,542.060,0.1502,0.2470,0.8421,-20.4894 +units=m +no_defs <>"
+    )
 
     # Attributes
-    _stop_id_col = 'stop_id'
+    _stop_id_col = "stop_id"
 
     # Container
     stop_data = pd.DataFrame()
@@ -144,18 +150,21 @@ def _get_tfl_style_stops(data):
                         x, y = pyproj.transform(p1=osgb36, p2=wgs84, x=x, y=y)
 
                     # Create row
-                    stop = dict(stop_id=stop_id,
-                                stop_code=None,
-                                stop_name=stop_name,
-                                stop_lat=y,
-                                stop_lon=x,
-                                stop_url=None
-                                )
+                    stop = dict(
+                        stop_id=stop_id,
+                        stop_code=None,
+                        stop_name=stop_name,
+                        stop_lat=y,
+                        stop_lon=x,
+                        stop_url=None,
+                    )
 
                 except Exception:
-                    warnings.warn("Did not find a NaPTAN stop for '%s'" % stop_id,
-                                  UserWarning,
-                                  stacklevel=2)
+                    warnings.warn(
+                        "Did not find a NaPTAN stop for '%s'" % stop_id,
+                        UserWarning,
+                        stacklevel=2,
+                    )
                     continue
 
         elif len(stop) > 1:
@@ -166,9 +175,10 @@ def _get_tfl_style_stops(data):
 
     return stop_data
 
+
 def _get_txc_21_style_stops(data):
     # Attributes
-    _stop_id_col = 'stop_id'
+    _stop_id_col = "stop_id"
 
     # Container
     stop_data = pd.DataFrame()
@@ -193,9 +203,11 @@ def _get_txc_21_style_stops(data):
 
             # If it could still not be found warn and skip
             if len(stop) == 0:
-                warnings.warn("Did not find a NaPTAN stop for '%s'" % stop_id,
-                              UserWarning,
-                              stacklevel=2)
+                warnings.warn(
+                    "Did not find a NaPTAN stop for '%s'" % stop_id,
+                    UserWarning,
+                    stacklevel=2,
+                )
                 continue
 
         elif len(stop) > 1:
@@ -210,13 +222,13 @@ def _get_txc_21_style_stops(data):
 def get_stops(data):
     """Parse stop data from TransXchange elements"""
 
-    if 'StopPoint' in data.TransXChange.StopPoints.__dir__():
+    if "StopPoint" in data.TransXChange.StopPoints.__dir__():
         stop_data = _get_tfl_style_stops(data)
-    elif 'AnnotatedStopPointRef' in data.TransXChange.StopPoints.__dir__():
+    elif "AnnotatedStopPointRef" in data.TransXChange.StopPoints.__dir__():
         stop_data = _get_txc_21_style_stops(data)
     else:
         raise ValueError(
-            "Did not find tag for Stop data in TransXchange xml. " 
+            "Did not find tag for Stop data in TransXchange xml. "
             "Could not parse Stop information from the TransXchange."
         )
 
