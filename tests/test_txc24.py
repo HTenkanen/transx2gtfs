@@ -1218,7 +1218,8 @@ def test_snapshots_are_private_copies_of_the_configured_feed(monkeypatch, tmp_pa
     assert first != second
     assert open(first, "rb").read() == open(second, "rb").read()
     assert first.startswith(str(tmp_path))
-    assert oct(os.stat(os.path.dirname(first)).st_mode & 0o777) == "0o700"
+    if os.name != "nt":  # Windows has no POSIX directory modes
+        assert oct(os.stat(os.path.dirname(first)).st_mode & 0o777) == "0o700"
     # a worker reads the snapshot it was given, whatever the environment says
     monkeypatch.setenv("TRANSX2GTFS_BANK_HOLIDAYS_PATH", str(tmp_path / "missing.json"))
     bh_module.set_bank_holidays_path(first)
