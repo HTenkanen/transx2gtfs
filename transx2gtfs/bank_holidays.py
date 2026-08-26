@@ -1,60 +1,66 @@
-import pandas as pd
+import io
+import os
+import urllib.request
 from datetime import datetime
-from urllib.error import HTTPError
+from urllib.error import URLError
+
+import pandas as pd
+
+from transx2gtfs.data import get_path
+
+BANK_HOLIDAYS_URL = "https://www.gov.uk/bank-holidays.json"
+BANK_HOLIDAYS_PATH_ENV = "TRANSX2GTFS_BANK_HOLIDAYS_PATH"
+REGIONS = ["england-and-wales", "scotland", "northern-ireland"]
+
+
+def read_bank_holidays():
+    """
+    Read the gov.uk bank holiday table for all regions, one row per date.
+
+    Uses ``TRANSX2GTFS_BANK_HOLIDAYS_PATH`` if set, otherwise downloads from
+    gov.uk and falls back to the file bundled with the package.
+    """
+    local_path = os.environ.get(BANK_HOLIDAYS_PATH_ENV)
+    if local_path:
+        bholidays = pd.read_json(local_path)
+    else:
+        try:
+            with urllib.request.urlopen(BANK_HOLIDAYS_URL, timeout=30) as response:
+                bholidays = pd.read_json(io.BytesIO(response.read()))
+        # URLError is an OSError; ValueError covers a non-JSON response
+        except (URLError, OSError, ValueError):
+            print("Could not read bank holidays via Internet, using static file.")
+            bholidays = pd.read_json(get_path("bank_holidays"))
+
+    frames = []
+    for region in REGIONS:
+        region_data = pd.DataFrame(bholidays.loc["events", region])
+        region_data["region"] = region
+        frames.append(region_data)
+    bank_holidays = pd.concat(frames, ignore_index=True)
+
+    bank_holidays = bank_holidays.drop_duplicates(subset=["date"])
+    bank_holidays = bank_holidays.sort_values(by="date").reset_index(drop=True)
+    bank_holidays["dt"] = pd.to_datetime(bank_holidays["date"])
+    return bank_holidays.set_index("dt", drop=False)
 
 
 def get_bank_holiday_dates(gtfs_info):
     """
-    Retrieve information about UK bank holidays that are during the feed operative period.
-
-    Available regions: 'england-and-wales', 'scotland', 'northern-ireland'
+    Retrieve UK bank holidays (all regions) during the feed operative period,
+    as a list of GTFS dates (YYYYMMDD), or None if there are none.
     """
-    available_regions = ["england-and-wales", "scotland", "northern-ireland"]
-
-    # Get bank holidays from UK Gov
-    bank_holidays_url = "https://www.gov.uk/bank-holidays.json"
-
-    # Read data from URL by default
-    try:
-        bholidays = pd.read_json(bank_holidays_url)
-    # If url is unreachable use static file from the package
-    except HTTPError:
-        print("Could not read bank holidays via Internet, using static file instead.")
-        bholidays = pd.read_json("data/bank-holidays.json")
-
-    # Get bank holidays of all regions
-    bank_holidays = pd.DataFrame()
-    for region in available_regions:
-        region_data = pd.DataFrame(bholidays.loc["events", region])
-        region_data["region"] = region
-        bank_holidays = bank_holidays.append(region_data, ignore_index=True, sort=False)
-
-    # Drop duplicates
-    bank_holidays = bank_holidays.drop_duplicates(subset=["date"])
-
-    # Sort
-    bank_holidays = bank_holidays.sort_values(by="date").reset_index(drop=True)
-
-    # Make datetime from date and make index
-    bank_holidays["dt"] = pd.to_datetime(
-        bank_holidays["date"], infer_datetime_format=True
-    )
-    bank_holidays = bank_holidays.set_index("dt", drop=False)
+    bank_holidays = read_bank_holidays()
 
     # Get start and end date of the GTFS feed
     start_date_min = datetime.strptime(gtfs_info["start_date"].min(), "%Y%m%d")
     end_date_max = datetime.strptime(gtfs_info["end_date"].max(), "%Y%m%d")
 
     # Select bank holidays that fit the time range
-    selected_bank_holidays = bank_holidays[start_date_min:end_date_max]
+    selected_bank_holidays = bank_holidays.loc[start_date_min:end_date_max]
 
-    # Check if there were any bank holidays during the feed time
     if len(selected_bank_holidays) == 0:
         return None
 
-    # If there are return get the dates
     dates = selected_bank_holidays["dt"].to_list()
-    # Parse in GTFS date format
-    gtfs_dates = [date.strftime("%Y%m%d") for date in dates]
-
-    return gtfs_dates
+    return [date.strftime("%Y%m%d") for date in dates]

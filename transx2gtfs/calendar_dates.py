@@ -1,40 +1,32 @@
-import pandas as pd
-from transx2gtfs.bank_holidays import get_bank_holiday_dates
 import warnings
+
+import pandas as pd
+
+from transx2gtfs.bank_holidays import get_bank_holiday_dates
+
+
+def _non_operation_names(operating_profile):
+    days = operating_profile.BankHolidayOperation.DaysOfNonOperation.get_elements()
+    names = [elem._name for elem in days]
+    if len(names) == 1:
+        return names[0]
+    return "|".join(names)
 
 
 def get_service_calendar_dates_exceptions(data):
-    """Parses calendar dates exception info from TransXChange VehicleJourney element"""
+    """Parses calendar dates exception info from TransXChange Service element"""
     try:
-        non_operative_days = (
-            data.TransXChange.Services.Service.OperatingProfile.BankHolidayOperation.DaysOfNonOperation.get_elements()
-        )
-        weekdays = []
-        for elem in non_operative_days:
-            weekdays.append(elem._name)
-        if len(weekdays) == 1:
-            return weekdays[0]
-        else:
-            return "|".join(weekdays)
-    except:
+        service = data.TransXChange.Services.Service
+        return _non_operation_names(service.OperatingProfile)
+    except Exception:
         return None
 
 
 def get_calendar_dates_exceptions(vehicle_journey_element):
     """Parses calendar dates exception info from TransXChange VehicleJourney element"""
-    j = vehicle_journey_element
     try:
-        non_operative_days = (
-            j.OperatingProfile.BankHolidayOperation.DaysOfNonOperation.get_elements()
-        )
-        weekdays = []
-        for elem in non_operative_days:
-            weekdays.append(elem._name)
-        if len(weekdays) == 1:
-            return weekdays[0]
-        else:
-            return "|".join(weekdays)
-    except:
+        return _non_operation_names(vehicle_journey_element.OperatingProfile)
+    except Exception:
         return None
 
 
@@ -42,9 +34,11 @@ def get_calendar_dates(gtfs_info):
     """
     Parse calendar dates attributes from GTFS info DataFrame.
 
-    TransXChange typically indicates exception in operation using 'AllBankHolidays' as an attribute.
-    Hence, Bank holiday information is retrieved from "https://www.gov.uk/" site that should keep the data up-to-date.
-    If the file (or internet) is not available, a static version of the same file will be used that is bundled with the package.
+    TransXChange typically indicates exception in operation using 'AllBankHolidays'
+    as an attribute. Hence, Bank holiday information is retrieved from
+    "https://www.gov.uk/" site that should keep the data up-to-date. If the file
+    (or internet) is not available, a static version of the same file will be
+    used that is bundled with the package.
 
     There are different bank holidays in different regions in UK.
     Available regions are: 'england-and-wales', 'scotland', 'northern-ireland'
@@ -103,35 +97,20 @@ def get_calendar_dates(gtfs_info):
     if bank_holidays is None:
         return None
 
-    # Otherwise produce calendar_dates data
-
     # Select distinct (service_id) rows that have bank holiday determined
     calendar_info = gtfs_info[["service_id", "non_operative_days"]].copy()
     calendar_info = calendar_info.drop_duplicates(subset=["service_id"])
 
-    # Create columns for date and exception_type
-    calendar_info["date"] = None
-
-    # The exception will always be indicating non-operative service (value 2)
-    calendar_info["exception_type"] = 2
-
-    # Container for calendar_dates
-    calendar_dates = pd.DataFrame()
-
-    # Iterate over services and produce rows having exception with given bank holiday dates
-    for idx, row in calendar_info.iterrows():
-        # Iterate over exception dates
+    # One row per service and bank holiday; the exception always indicates
+    # a non-operative service (value 2)
+    rows = []
+    for service_id in calendar_info["service_id"]:
         for date in bank_holidays:
-            # Generate row
-            row = dict(
-                service_id=row["service_id"],
-                date=date,
-                exception_type=row["exception_type"],
-            )
-            # Add to container
-            calendar_dates = calendar_dates.append(row, ignore_index=True, sort=False)
+            rows.append(dict(service_id=service_id, date=date, exception_type=2))
 
-    # Ensure correct datatype
+    calendar_dates = pd.DataFrame(
+        rows, columns=["service_id", "date", "exception_type"]
+    )
     calendar_dates["exception_type"] = calendar_dates["exception_type"].astype(int)
 
     return calendar_dates

@@ -54,8 +54,11 @@ def get_xml_paths(filepath):
                 xml_contents += get_paths_from_zip(zfp)
 
     # Input is a ZipFile
-    elif filepath.endswith(".zip"):
+    elif os.path.isfile(filepath) and filepath.endswith(".zip"):
         xml_contents = get_paths_from_zip(filepath)
+
+    else:
+        raise ValueError("Input '%s' is not a directory or a .zip file." % filepath)
 
     return xml_contents
 
@@ -77,7 +80,8 @@ def read_xml_inside_zip(xml_path):
     filename = list(xml_path.keys())[0]
     z = ZipFile(zip_filepath)
     file_size = z.getinfo(filename).file_size
-    parsed_xml = untangle.parse(io.TextIOWrapper(io.BytesIO(z.read(filename))))
+    # Pass bytes so the XML declaration's encoding is honoured
+    parsed_xml = untangle.parse(io.BytesIO(z.read(filename)))
     return parsed_xml, file_size, filename
 
 
@@ -96,8 +100,13 @@ def read_xml_inside_nested_zip(xml_path):
     # Read inner zip to memory
     inner_zip = ZipFile(io.BytesIO(z.read(inner_zip_name)))
     file_size = inner_zip.getinfo(xml_name).file_size
-    parsed_xml = untangle.parse(io.TextIOWrapper(io.BytesIO(inner_zip.read(xml_name))))
+    parsed_xml = untangle.parse(io.BytesIO(inner_zip.read(xml_name)))
     return parsed_xml, file_size, xml_name
+
+
+def _table_exists(conn, name):
+    query = "SELECT name FROM sqlite_master WHERE type='table' AND name=?"
+    return conn.execute(query, (name,)).fetchone() is not None
 
 
 def generate_gtfs_export(gtfs_db_fp):
@@ -161,13 +170,13 @@ def generate_gtfs_export(gtfs_db_fp):
 
     # Calendar dates
     # --------------
-    try:
+    if _table_exists(conn, "calendar_dates"):
         calendar_dates = pd.read_sql_query("SELECT * FROM calendar_dates", conn)
         if "index" in calendar_dates.columns:
             calendar_dates = calendar_dates.drop("index", axis=1)
-        # Drop duplicates
-        calendar_dates = calendar_dates.drop_duplicates(subset=["service_id"])
-    except:
+        # Drop duplicates (a service has one row per exception date)
+        calendar_dates = calendar_dates.drop_duplicates()
+    else:
         # If data is not available pass empty DataFrame
         calendar_dates = pd.DataFrame()
 
@@ -200,9 +209,6 @@ def save_to_gtfs_zip(output_zip_fp, gtfs_data):
         A dictionary containing DataFrames for different GTFS outputs.
     """
     print("Exporting GTFS\n----------------------")
-
-    # Quoted attributes in stops
-    _quote_attributes = ["stop_name", "stop_desc", "trip_headsign"]
 
     # Open stream
     with ZipFile(output_zip_fp, "w") as zf:

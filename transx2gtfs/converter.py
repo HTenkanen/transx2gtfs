@@ -2,35 +2,38 @@
 """
 Convert transXchange data format to GTFS format.
 
-The TransXChange model) has seven basic concepts: Service, Registration, Operator, Route,
-StopPoint, JourneyPattern, and VehicleJourney.
-    - A Service brings together the information about a registered bus service, and may contain
-        two types of component service: Standard or Flexible; a mix of both types is allowed within a
-        single Service.
-    - A normal bus schedule is described by a StandardService and a Route. A Route describes
-        the physical path taken by buses on the service as a set of route links.
-    - A FlexibleService describes a bus service that does not have a fixed route, but only a
-        catchment area or a few variable stops with no prescribed pattern of use.
+The TransXChange model) has seven basic concepts: Service, Registration, Operator,
+Route, StopPoint, JourneyPattern, and VehicleJourney.
+    - A Service brings together the information about a registered bus service, and may
+        contain two types of component service: Standard or Flexible; a mix of both
+        types is allowed within a single Service.
+    - A normal bus schedule is described by a StandardService and a Route. A Route
+        describes the physical path taken by buses on the service as a set of route
+        links.
+    - A FlexibleService describes a bus service that does not have a fixed route, but
+        only a catchment area or a few variable stops with no prescribed pattern of use.
     - A StandardService has one or more JourneyPattern elements to describe the common
-        logical path of traversal of the stops of the Route as a sequence of timing links (see later),
-        and one or more VehicleJourney elements, which describe individual scheduled journeys by
-        buses over the Route and JourneyPattern at a specific time.
-    - Both types of service have a registered Operator, who runs the service. Other associated
-        operator roles can also be specified.
+        logical path of traversal of the stops of the Route as a sequence of timing
+        links (see later), and one or more VehicleJourney elements, which describe
+        individual scheduled journeys by buses over the Route and JourneyPattern at a
+        specific time.
+    - Both types of service have a registered Operator, who runs the service. Other
+        associated operator roles can also be specified.
     - Route, JourneyPattern and VehicleJoumey follow a sequence of NaPTAN StopPoints. A
-        Route specifies in effect an ordered list of StopPoints. A JourneyPattern specifies an
-        ordered list of links between these points, giving relative times between each stop; a
-        VehicleJourney follows the same list of stops at specific absolute passing times. (The
-        detailed timing Link and elements that connect VehicleJourneys, JourneyPatterns etc to
-        StopPoints are not shown in Figure 3-1). StopPoints may be grouped within StopAreas.
+        Route specifies in effect an ordered list of StopPoints. A JourneyPattern
+        specifies an ordered list of links between these points, giving relative times
+        between each stop; a VehicleJourney follows the same list of stops at specific
+        absolute passing times. (The detailed timing Link and elements that connect
+        VehicleJourneys, JourneyPatterns etc to StopPoints are not shown in Figure 3-1).
+        StopPoints may be grouped within StopAreas.
     - The StopPoints used in a JourneyPattern or Route are either declared locally or by
         referenced to an external definition using an AnnotatedStopRef
-    - A Registration specifies the registration details for a service. It is mandatory in the
-        registration schema.
+    - A Registration specifies the registration details for a service. It is mandatory
+        in the registration schema.
 
 Author
 ------
-Dr. Henrikki Tenkanen, University College London
+Henrikki Tenkanen, Aalto University
 
 License
 -------
@@ -39,11 +42,12 @@ MIT.
 """
 
 from time import time as timeit
+import contextlib
 import sqlite3
 import os
 import multiprocessing
 from transx2gtfs.stop_times import get_stop_times
-from transx2gtfs.stops import get_stops
+from transx2gtfs.stops import get_stops, ensure_naptan_data
 from transx2gtfs.trips import get_trips
 from transx2gtfs.routes import get_routes
 from transx2gtfs.agency import get_agency
@@ -57,6 +61,14 @@ from transx2gtfs.dataio import (
 )
 from transx2gtfs.transxchange import get_gtfs_info
 from transx2gtfs.distribute import create_workers
+
+# Lock serialising database writes across worker processes (set by _init_worker)
+_db_lock = None
+
+
+def _init_worker(lock):
+    global _db_lock
+    _db_lock = lock
 
 
 def process_files(parallel):
@@ -132,32 +144,23 @@ def process_files(parallel):
         # Parse routes
         routes = get_routes(gtfs_info=gtfs_info, data=data)
 
-        # Initialize database connection
-        conn = sqlite3.connect(gtfs_db)
-
         # Only export data into db if there exists valid stop_times data
         if len(stop_times) > 0:
-            stop_times.to_sql(
-                name="stop_times", con=conn, index=False, if_exists="append"
+            _write_to_db(
+                gtfs_db,
+                stop_times=stop_times,
+                stops=stop_data,
+                routes=routes,
+                agency=agency,
+                trips=trips,
+                calendar=calendar,
+                calendar_dates=calendar_dates,
             )
-            stop_data.to_sql(name="stops", con=conn, index=False, if_exists="append")
-            routes.to_sql(name="routes", con=conn, index=False, if_exists="append")
-            agency.to_sql(name="agency", con=conn, index=False, if_exists="append")
-            trips.to_sql(name="trips", con=conn, index=False, if_exists="append")
-            calendar.to_sql(name="calendar", con=conn, index=False, if_exists="append")
-
-            if calendar_dates is not None:
-                calendar_dates.to_sql(
-                    name="calendar_dates", con=conn, index=False, if_exists="append"
-                )
         else:
             print(
                 "UserWarning: File %s did not contain valid stop_sequence data, skipping."
                 % (xml_name)
             )
-
-        # Close connection
-        conn.close()
 
         # Log end time and parse duration
         end_t = timeit()
@@ -165,9 +168,18 @@ def process_files(parallel):
 
         print("It took %s minutes." % round(duration, 1))
 
-        # ===================
-        # ===================
-        # ===================
+
+def _write_to_db(gtfs_db, **tables):
+    """Append the GTFS tables of one file to the database (one writer at a time)"""
+    lock = _db_lock if _db_lock is not None else contextlib.nullcontext()
+    with lock:
+        conn = sqlite3.connect(gtfs_db, timeout=120)
+        try:
+            for name, table in tables.items():
+                if table is not None:
+                    table.to_sql(name=name, con=conn, index=False, if_exists="append")
+        finally:
+            conn.close()
 
 
 def convert(
@@ -181,19 +193,21 @@ def convert(
     Converts TransXchange formatted schedule data into GTFS feed.
 
     input_filepath : str
-        File path to data directory or a ZipFile containing one or multiple TransXchange .xml files.
-        Also nested ZipFiles are supported (i.e. a ZipFile with ZipFile(s) containing .xml files.)
+        File path to data directory or a ZipFile containing one or multiple
+        TransXchange .xml files. Also nested ZipFiles are supported (i.e. a ZipFile
+        with ZipFile(s) containing .xml files.)
     output_filepath : str
         Full filepath to the output GTFS zip-file, e.g. '/home/myuser/data/my_gtfs.zip'
     append_to_existing : bool (default is False)
-        Flag for appending to existing gtfs-database. This might be useful if you have
-        TransXchange .xml files distributed into multiple directories (e.g. separate files for
-        train data, tube data and bus data) and you want to merge all those datasets into a single
-        GTFS feed.
+        Flag for appending to existing gtfs-database. This might be useful if you
+        have TransXchange .xml files distributed into multiple directories (e.g.
+        separate files for train data, tube data and bus data) and you want to merge
+        all those datasets into a single GTFS feed.
     worker_cnt : int
-        Number of workers to distribute the conversion process. By default the number of CPUs is used.
+        Number of worker processes. By default the number of CPUs minus one is used.
     file_size_limit : int
-        File size limit (in megabytes) can be used to skip larger-than-memory XML-files (should not happen).
+        File size limit (in megabytes) can be used to skip larger-than-memory
+        XML-files (should not happen).
     """
     # Total start
     tot_start_t = timeit()
@@ -203,12 +217,19 @@ def convert(
     gtfs_db = os.path.join(target_dir, "gtfs.db")
 
     # If append to database is false remove previous gtfs-database if it exists
-    if append_to_existing == False:
+    if not append_to_existing:
         if os.path.exists(gtfs_db):
             os.remove(gtfs_db)
 
     # Retrieve all TransXChange files
     files = get_xml_paths(input_filepath)
+    if len(files) == 0:
+        raise ValueError(
+            "Did not find any TransXChange .xml files from '%s'." % input_filepath
+        )
+
+    # Make sure the NaPTAN stop data is available before the workers start
+    ensure_naptan_data()
 
     # Iterate over files
     print("Populating database ..")
@@ -221,11 +242,12 @@ def convert(
         gtfs_db=gtfs_db,
     )
 
-    # Create Pool
-    pool = multiprocessing.Pool()
-
-    # Generate GTFS info to the database in parallel
-    pool.map(process_files, workers)
+    # Generate GTFS info to the database in parallel; workers take turns writing
+    lock = multiprocessing.Lock()
+    with multiprocessing.Pool(
+        processes=len(workers), initializer=_init_worker, initargs=(lock,)
+    ) as pool:
+        pool.map(process_files, workers)
 
     # Print information about the total time
     tot_end_t = timeit()

@@ -1,4 +1,8 @@
+import warnings
+
 import pandas as pd
+
+from transx2gtfs.utils import as_list
 
 
 def get_mode(mode):
@@ -15,12 +19,6 @@ def get_mode(mode):
         return 4
 
 
-def get_route_type(data):
-    """Returns the route type according GTFS reference"""
-    mode = data.TransXChange.Services.Service.Mode.cdata
-    return get_mode(mode)
-
-
 def get_routes(gtfs_info, data):
     """Get routes from TransXchange elements"""
     # Columns to use in output
@@ -32,16 +30,21 @@ def get_routes(gtfs_info, data):
         "route_type",
     ]
 
-    routes = pd.DataFrame()
-
-    for r in data.TransXChange.Routes.Route:
-        # Get route id
+    rows = []
+    for r in as_list(data.TransXChange.Routes.Route):
         route_id = r.get_attribute("id")
 
-        # Get agency_id
-        agency_id = gtfs_info.loc[
-            gtfs_info["route_id"] == route_id, "agency_id"
-        ].unique()[0]
+        # Agency and travel mode come from the journey patterns using the route
+        route_info = gtfs_info.loc[gtfs_info["route_id"] == route_id]
+        if len(route_info) == 0:
+            warnings.warn(
+                "Route '%s' is not used by any vehicle journey, skipping." % route_id,
+                UserWarning,
+                stacklevel=2,
+            )
+            continue
+        agency_id = route_info["agency_id"].unique()[0]
+        route_type = int(route_info["travel_mode"].unique()[0])
 
         # Get route long name
         route_long_name = r.Description.cdata
@@ -55,24 +58,17 @@ def get_routes(gtfs_info, data):
         # Route Section reference (might be needed somewhere)
         route_section_id = r.RouteSectionRef.cdata
 
-        # Get route_type
-        route_type = get_route_type(data)
-
-        # Generate row
-        route = dict(
-            route_id=route_id,
-            agency_id=agency_id,
-            route_private_id=route_private_id,
-            route_long_name=route_long_name,
-            route_short_name=route_short_name,
-            route_type=route_type,
-            route_section_id=route_section_id,
+        rows.append(
+            dict(
+                route_id=route_id,
+                agency_id=agency_id,
+                route_private_id=route_private_id,
+                route_long_name=route_long_name,
+                route_short_name=route_short_name,
+                route_type=route_type,
+                route_section_id=route_section_id,
+            )
         )
-        routes = routes.append(route, ignore_index=True, sort=False)
 
-    # Ensure that route type is integer
-    routes["route_type"] = routes["route_type"].astype(int)
-
-    # Select only required columns
-    routes = routes[use_cols].copy()
+    routes = pd.DataFrame(rows, columns=use_cols)
     return routes

@@ -1,6 +1,3 @@
-import pandas as pd
-
-
 def get_direction(direction_id):
     """Return boolean direction id"""
     if direction_id == "inbound":
@@ -34,20 +31,13 @@ def get_stop_times(gtfs_info):
         stop_times[col] = stop_times[col].astype(int)
 
     # If there is only a single sequence for a trip, do not export it
-    grouped = stop_times.groupby("trip_id")
-    filtered_stop_times = pd.DataFrame()
-    for idx, group in grouped:
-        if len(group) > 1:
-            filtered_stop_times = filtered_stop_times.append(
-                group, ignore_index=True, sort=False
-            )
-        else:
-            print(
-                "Trip '%s' does not include a sequence of stops, excluding from GTFS."
-                % idx
-            )
-
-    return filtered_stop_times
+    stops_per_trip = stop_times.groupby("trip_id")["stop_id"].transform("size")
+    for trip_id in stop_times.loc[stops_per_trip <= 1, "trip_id"].unique():
+        print(
+            "Trip '%s' does not include a sequence of stops, excluding from GTFS."
+            % trip_id
+        )
+    return stop_times[stops_per_trip > 1].reset_index(drop=True)
 
 
 def generate_service_id(stop_times):
@@ -63,7 +53,7 @@ def generate_service_id(stop_times):
     calendar_groups = calendar_info.groupby("weekdays")
 
     # Iterate over groups and create a service_id
-    for weekday, cgroup in calendar_groups:
+    for _, cgroup in calendar_groups:
         # Parse all vehicle journey ids
         vehicle_journey_ids = cgroup["vehicle_journey_id"].to_list()
 
