@@ -11,35 +11,31 @@ WEEKDAYS = [
 ]
 
 
-def _weekday_names(days_of_week_element):
-    weekdays = [elem._name for elem in days_of_week_element.get_elements()]
-    if len(weekdays) == 1:
-        return weekdays[0]
-    return "|".join(weekdays)
-
-
-def get_service_operative_days_info(data):
-    """
-    Get operating profile information from Services.Service.
-
-    This is used if VehicleJourney does not contain the information.
-    """
-    try:
-        service = data.TransXChange.Services.Service
-        return _weekday_names(service.OperatingProfile.RegularDayType.DaysOfWeek)
-    except Exception:
-        # If service does not have OperatingProfile available, return None
+def join_names(names):
+    """Encode a list of tag names as 'A' / 'A|B'; None stays None"""
+    if names is None:
         return None
+    if len(names) == 1:
+        return names[0]
+    return "|".join(names)
 
 
-def get_weekday_info(vehicle_journey_element):
-    """Parses weekday info from TransXChange VehicleJourney element"""
-    j = vehicle_journey_element
-    try:
-        return _weekday_names(j.OperatingProfile.RegularDayType.DaysOfWeek)
-    except Exception:
-        # If journey does not have OperatingProfile available, return None
+def get_weekday_info(operating_profile):
+    """Weekday info ('Weekend', 'MondayToFriday', 'Saturday|Sunday', ...) of an
+    OperatingProfile, or None if the profile has no DaysOfWeek"""
+    if operating_profile is None:
         return None
+    return join_names(operating_profile.days_of_week)
+
+
+def get_service_operative_days_info(doc):
+    """
+    Weekday info from the service's OperatingProfile (first Service of the
+    document). Used if a VehicleJourney does not carry its own profile.
+    """
+    if not doc.services:
+        return None
+    return get_weekday_info(doc.services[0].operating_profile)
 
 
 def parse_active_days(dayinfo):

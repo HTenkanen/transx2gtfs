@@ -1,0 +1,9 @@
+route_id,agency_id,route_short_name,route_long_name,route_type
+R_1-HAM-_-y05-2675925-I-1,OId_LUL,R_1-HAM,King's Cross St. Pancras - Edgware Road (Circle line) Station,1
+R_1-HAM-_-y05-2675925-I-2,OId_LUL,R_1-HAM,King's Cross St. Pancras - Hammersmith (Ham & City Line),1
+R_1-HAM-_-y05-2675925-I-3,OId_LUL,R_1-HAM,Edgware Road (Circle line) Station - Hammersmith (Ham & City Line),1
+R_1-HAM-_-y05-2675925-O-4,OId_LUL,R_1-HAM,Hammersmith (Ham & City Line) - Edgware Road (Circle line) Station,1
+R_1-HAM-_-y05-2675925-O-5,OId_LUL,R_1-HAM,Hammersmith (Ham & City Line) - King's Cross St. Pancras,1
+R_1-HAM-_-y05-2675925-O-7,OId_LUL,R_1-HAM,Edgware Road (Circle line) Station - King's Cross St. Pancras,1
+R_1-HAM-_-y05-2675925-I-8,OId_LUL,R_1-HAM,Plaistow - Aldgate East,1
+R_1-HAM-_-y05-2675925-O-9,OId_LUL,R_1-HAM,Aldgate East - Barking Station,1

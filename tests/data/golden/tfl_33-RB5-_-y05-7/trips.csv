@@ -1,0 +1,28 @@
+route_id,service_id,trip_id,trip_headsign,direction_id
+R_33-RB5-_-y05-7-O-2,33-RB5-_-y05-7_20190223_20191222_Weekend,JPS_33-RB5-_-y05-7-2-2-O_Weekend_1102,North Greenwich Pier,1
+R_33-RB5-_-y05-7-O-2,33-RB5-_-y05-7_20190223_20191222_Weekend,JPS_33-RB5-_-y05-7-2-2-O_Weekend_1132,North Greenwich Pier,1
+R_33-RB5-_-y05-7-O-2,33-RB5-_-y05-7_20190223_20191222_Weekend,JPS_33-RB5-_-y05-7-2-2-O_Weekend_1202,North Greenwich Pier,1
+R_33-RB5-_-y05-7-O-2,33-RB5-_-y05-7_20190223_20191222_Weekend,JPS_33-RB5-_-y05-7-2-2-O_Weekend_1232,North Greenwich Pier,1
+R_33-RB5-_-y05-7-O-2,33-RB5-_-y05-7_20190223_20191222_Weekend,JPS_33-RB5-_-y05-7-2-2-O_Weekend_1302,North Greenwich Pier,1
+R_33-RB5-_-y05-7-O-2,33-RB5-_-y05-7_20190223_20191222_Weekend,JPS_33-RB5-_-y05-7-2-2-O_Weekend_1332,North Greenwich Pier,1
+R_33-RB5-_-y05-7-O-2,33-RB5-_-y05-7_20190223_20191222_Weekend,JPS_33-RB5-_-y05-7-2-2-O_Weekend_1402,North Greenwich Pier,1
+R_33-RB5-_-y05-7-O-2,33-RB5-_-y05-7_20190223_20191222_Weekend,JPS_33-RB5-_-y05-7-2-2-O_Weekend_1432,North Greenwich Pier,1
+R_33-RB5-_-y05-7-O-2,33-RB5-_-y05-7_20190223_20191222_Weekend,JPS_33-RB5-_-y05-7-2-2-O_Weekend_1502,North Greenwich Pier,1
+R_33-RB5-_-y05-7-O-2,33-RB5-_-y05-7_20190223_20191222_Weekend,JPS_33-RB5-_-y05-7-2-2-O_Weekend_1532,North Greenwich Pier,1
+R_33-RB5-_-y05-7-I-1,33-RB5-_-y05-7_20190223_20191222_Weekend,JPS_33-RB5-_-y05-7-1-1-I_Weekend_1117,Woolwich Royal Arsenal Pier,0
+R_33-RB5-_-y05-7-I-1,33-RB5-_-y05-7_20190223_20191222_Weekend,JPS_33-RB5-_-y05-7-1-1-I_Weekend_1147,Woolwich Royal Arsenal Pier,0
+R_33-RB5-_-y05-7-I-1,33-RB5-_-y05-7_20190223_20191222_Weekend,JPS_33-RB5-_-y05-7-1-1-I_Weekend_1217,Woolwich Royal Arsenal Pier,0
+R_33-RB5-_-y05-7-I-1,33-RB5-_-y05-7_20190223_20191222_Weekend,JPS_33-RB5-_-y05-7-1-1-I_Weekend_1247,Woolwich Royal Arsenal Pier,0
+R_33-RB5-_-y05-7-I-1,33-RB5-_-y05-7_20190223_20191222_Weekend,JPS_33-RB5-_-y05-7-1-1-I_Weekend_1317,Woolwich Royal Arsenal Pier,0
+R_33-RB5-_-y05-7-I-1,33-RB5-_-y05-7_20190223_20191222_Weekend,JPS_33-RB5-_-y05-7-1-1-I_Weekend_1347,Woolwich Royal Arsenal Pier,0
+R_33-RB5-_-y05-7-I-1,33-RB5-_-y05-7_20190223_20191222_Weekend,JPS_33-RB5-_-y05-7-1-1-I_Weekend_1417,Woolwich Royal Arsenal Pier,0
+R_33-RB5-_-y05-7-I-1,33-RB5-_-y05-7_20190223_20191222_Weekend,JPS_33-RB5-_-y05-7-1-1-I_Weekend_1447,Woolwich Royal Arsenal Pier,0
+R_33-RB5-_-y05-7-O-2,33-RB5-_-y05-7_20190223_20191222_Weekend,JPS_33-RB5-_-y05-7-2-2-O_Weekend_1602,North Greenwich Pier,1
+R_33-RB5-_-y05-7-I-1,33-RB5-_-y05-7_20190223_20191222_Weekend,JPS_33-RB5-_-y05-7-1-1-I_Weekend_1517,Woolwich Royal Arsenal Pier,0
+R_33-RB5-_-y05-7-I-1,33-RB5-_-y05-7_20190223_20191222_Weekend,JPS_33-RB5-_-y05-7-1-1-I_Weekend_1547,Woolwich Royal Arsenal Pier,0
+R_33-RB5-_-y05-7-O-2,33-RB5-_-y05-7_20190223_20191222_Weekend,JPS_33-RB5-_-y05-7-2-2-O_Weekend_1632,North Greenwich Pier,1
+R_33-RB5-_-y05-7-I-1,33-RB5-_-y05-7_20190223_20191222_Weekend,JPS_33-RB5-_-y05-7-1-1-I_Weekend_1617,Woolwich Royal Arsenal Pier,0
+R_33-RB5-_-y05-7-I-1,33-RB5-_-y05-7_20190223_20191222_Weekend,JPS_33-RB5-_-y05-7-1-1-I_Weekend_1647,Woolwich Royal Arsenal Pier,0
+R_33-RB5-_-y05-7-O-2,33-RB5-_-y05-7_20190223_20191222_Weekend,JPS_33-RB5-_-y05-7-2-2-O_Weekend_1702,North Greenwich Pier,1
+R_33-RB5-_-y05-7-O-2,33-RB5-_-y05-7_20190223_20191222_Weekend,JPS_33-RB5-_-y05-7-2-2-O_Weekend_1732,North Greenwich Pier,1
+R_33-RB5-_-y05-7-I-1,33-RB5-_-y05-7_20190223_20191222_Weekend,JPS_33-RB5-_-y05-7-1-1-I_Weekend_1717,Woolwich Royal Arsenal Pier,0

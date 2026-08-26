@@ -1,8 +1,8 @@
 import pytest
-import untangle
 from pandas import DataFrame
 
 from transx2gtfs.transxchange import get_service_journey_pattern_info
+from transx2gtfs.txc import read_txc
 
 REQUIRED_COLUMNS = [
     "agency_id",
@@ -26,8 +26,8 @@ REQUIRED_COLUMNS = [
     "fixture_name, shape", [("txc21_file", (6, 14)), ("tfl_file", (43, 14))]
 )
 def test_reading_journey_patterns(fixture_name, shape, request):
-    data = untangle.parse(request.getfixturevalue(fixture_name))
-    journey_patterns = get_service_journey_pattern_info(data)
+    doc = read_txc(request.getfixturevalue(fixture_name))
+    journey_patterns = get_service_journey_pattern_info(doc)
 
     assert isinstance(journey_patterns, DataFrame)
     assert journey_patterns.shape == shape

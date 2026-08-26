@@ -1,6 +1,5 @@
 import numpy as np
 import pytest
-import untangle
 from pandas import DataFrame
 from pandas.testing import assert_frame_equal
 
@@ -13,6 +12,7 @@ from transx2gtfs.calendar import (
     parse_day_range,
 )
 from transx2gtfs.transxchange import get_gtfs_info
+from transx2gtfs.txc import read_txc
 
 
 def _day_frame(active):
@@ -21,21 +21,21 @@ def _day_frame(active):
 
 @pytest.mark.parametrize("fixture_name", ["tfl_file", "txc21_file"])
 def test_service_operative_days(fixture_name, request):
-    data = untangle.parse(request.getfixturevalue(fixture_name))
-    operative_days = get_service_operative_days_info(data)
+    doc = read_txc(request.getfixturevalue(fixture_name))
+    operative_days = get_service_operative_days_info(doc)
     assert operative_days == "Weekend"
 
 
 @pytest.mark.parametrize("fixture_name", ["tfl_file", "txc21_file"])
 def test_vehicle_journey_weekdays(fixture_name, request):
-    data = untangle.parse(request.getfixturevalue(fixture_name))
+    doc = read_txc(request.getfixturevalue(fixture_name))
     correct_frames = {
         "Sunday": _day_frame(["sunday"]),
         "Saturday": _day_frame(["saturday"]),
     }
 
-    for journey in data.TransXChange.VehicleJourneys.VehicleJourney:
-        weekdays = get_weekday_info(journey)
+    for journey in doc.vehicle_journeys:
+        weekdays = get_weekday_info(journey.operating_profile)
         assert weekdays in correct_frames
         assert_frame_equal(parse_day_range(weekdays), correct_frames[weekdays])
 
@@ -62,8 +62,8 @@ def test_parse_active_days(dayinfo, active):
     ],
 )
 def test_get_calendar(fixture_name, service_code, start, end, request):
-    data = untangle.parse(request.getfixturevalue(fixture_name))
-    gtfs_info = get_gtfs_info(data)
+    doc = read_txc(request.getfixturevalue(fixture_name))
+    gtfs_info = get_gtfs_info(doc)
     assert isinstance(gtfs_info, DataFrame)
 
     gtfs_calendar = get_calendar(gtfs_info)

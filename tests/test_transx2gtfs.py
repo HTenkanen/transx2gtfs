@@ -3,11 +3,11 @@ import io
 from zipfile import ZipFile
 
 import pandas as pd
-import untangle
 
 import transx2gtfs
 from transx2gtfs.__main__ import main
 from transx2gtfs.agency import get_agency, get_agency_url
+from transx2gtfs.txc import read_txc
 
 REQUIRED_FILES = [
     "agency.txt",
@@ -26,7 +26,7 @@ def test_agency_url_lookup():
 
 
 def test_get_agency(ferry_file):
-    agency = get_agency(untangle.parse(ferry_file))
+    agency = get_agency(read_txc(ferry_file))
     assert len(agency) == 1
     row = agency.iloc[0]
     assert row["agency_id"] == "OId_CV"

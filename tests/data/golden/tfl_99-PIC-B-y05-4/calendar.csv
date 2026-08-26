@@ -1,0 +1,3 @@
+service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date
+99-PIC-B-y05-4_20200201_20200202_Sunday,0,0,0,0,0,0,1,20200201,20200202
+99-PIC-B-y05-4_20200201_20200202_Saturday,0,0,0,0,0,1,0,20200201,20200202

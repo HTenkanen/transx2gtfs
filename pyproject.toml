@@ -27,9 +27,9 @@ classifiers = [
 ]
 dynamic = ["version"]
 dependencies = [
+    "lxml>=5.0",
     "pandas>=2.0",
     "pyproj>=3.0",
-    "untangle>=1.2",
 ]
 
 [project.optional-dependencies]
