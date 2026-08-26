@@ -6,6 +6,7 @@ from transx2gtfs.txc import read_txc
 
 REQUIRED_COLUMNS = [
     "agency_id",
+    "direction",
     "direction_id",
     "end_date",
     "journey_pattern_id",
@@ -23,7 +24,7 @@ REQUIRED_COLUMNS = [
 
 
 @pytest.mark.parametrize(
-    "fixture_name, shape", [("txc21_file", (6, 14)), ("tfl_file", (43, 14))]
+    "fixture_name, shape", [("txc21_file", (6, 15)), ("tfl_file", (43, 15))]
 )
 def test_reading_journey_patterns(fixture_name, shape, request):
     doc = read_txc(request.getfixturevalue(fixture_name))

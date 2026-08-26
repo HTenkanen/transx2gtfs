@@ -9,6 +9,15 @@ WEEKDAYS = [
     "saturday",
     "sunday",
 ]
+_WEEKDAY_NUMBERS = {day: i for i, day in enumerate(WEEKDAYS)}
+_RANGES = {
+    "mondaytofriday": [0, 1, 2, 3, 4],
+    "mondaytosaturday": [0, 1, 2, 3, 4, 5],
+    "mondaytosunday": [0, 1, 2, 3, 4, 5, 6],
+    "weekend": [5, 6],
+    "saturdaysundayholidaysonly": [5, 6],
+    "holidaysonly": [],
+}
 
 
 def join_names(names):
@@ -22,9 +31,12 @@ def join_names(names):
 
 def get_weekday_info(operating_profile):
     """Weekday info ('Weekend', 'MondayToFriday', 'Saturday|Sunday', ...) of an
-    OperatingProfile, or None if the profile has no DaysOfWeek"""
+    OperatingProfile, or None if the profile has no DaysOfWeek; 'HolidaysOnly'
+    for a profile that runs on holidays only"""
     if operating_profile is None:
         return None
+    if operating_profile.holidays_only and not operating_profile.days_of_week:
+        return "HolidaysOnly"
     return join_names(operating_profile.days_of_week)
 
 
@@ -38,40 +50,43 @@ def get_service_operative_days_info(doc):
     return get_weekday_info(doc.services[0].operating_profile)
 
 
+def _active_day_numbers(token):
+    """Weekday numbers denoted by one DaysOfWeek element name"""
+    key = token.strip().lower()
+    if key in _RANGES:
+        return _RANGES[key]
+    if key in _WEEKDAY_NUMBERS:
+        return [_WEEKDAY_NUMBERS[key]]
+    if key.startswith("not") and key[3:] in _WEEKDAY_NUMBERS:
+        return [i for i in range(7) if i != _WEEKDAY_NUMBERS[key[3:]]]
+    if "to" in key:
+        start, _, end = key.partition("to")
+        if start in _WEEKDAY_NUMBERS and end in _WEEKDAY_NUMBERS:
+            return list(range(_WEEKDAY_NUMBERS[start], _WEEKDAY_NUMBERS[end] + 1))
+    raise ValueError("Unknown DaysOfWeek value '%s'." % token)
+
+
 def parse_active_days(dayinfo):
-    """Parse a TransXChange DaysOfWeek value into a {weekday: 0/1} dict"""
-    weekday_to_num = {day: i for i, day in enumerate(WEEKDAYS)}
+    """
+    Parse a TransXChange DaysOfWeek value into a {weekday: 0/1} dict.
 
-    # Containers
-    active_days = []
-
-    # Process 'weekend'
-    if "weekend" in dayinfo.strip().lower():
-        active_days.append(5)
-        active_days.append(6)
-
-    # Check if dayinfo is specified as day-range
-    elif "To" in dayinfo:
-        day_range = dayinfo.split("To")
-        start_i = weekday_to_num[day_range[0].lower()]
-        end_i = weekday_to_num[day_range[1].lower()]
-
-        # Get days when the service is active
-        for idx in range(start_i, end_i + 1):
-            # Get days
-            active_days.append(idx)
-
-    # Process a collection of individual weekdays
-    elif "|" in dayinfo:
-        days = dayinfo.split("|")
-        for day in days:
-            active_days.append(weekday_to_num[day.lower()])
-
-    # If input is only a single day
+    ``dayinfo`` is the encoded string ('Weekend', 'MondayToFriday',
+    'Monday|Wednesday', 'NotSaturday', 'HolidaysOnly', ...); None or '' means
+    every day (a journey without any day information).
+    """
+    if dayinfo is None or dayinfo == "":
+        active = set(range(7))
     else:
-        active_days.append(weekday_to_num[dayinfo.lower()])
-
-    return {day: int(i in active_days) for i, day in enumerate(WEEKDAYS)}
+        tokens = dayinfo.split("|")
+        if all(t.strip().lower().startswith("not") for t in tokens):
+            active = set(range(7))
+            for token in tokens:
+                active &= set(_active_day_numbers(token))
+        else:
+            active = set()
+            for token in tokens:
+                active.update(_active_day_numbers(token))
+    return {day: int(i in active) for i, day in enumerate(WEEKDAYS)}
 
 
 def parse_day_range(dayinfo):

@@ -1,11 +1,18 @@
+DIRECTIONS = {
+    "inbound": 0,
+    "outbound": 1,
+    "inboundAndOutbound": 0,
+    "circular": 0,
+    "clockwise": 0,
+    "antiClockwise": 0,
+}
+
+
 def get_direction(direction_id):
     """Return boolean direction id"""
-    if direction_id == "inbound":
-        return 0
-    elif direction_id == "outbound":
-        return 1
-    else:
-        raise ValueError("Cannot determine direction from %s" % direction_id)
+    if direction_id in DIRECTIONS:
+        return DIRECTIONS[direction_id]
+    raise ValueError("Cannot determine direction from %s" % direction_id)
 
 
 def get_stop_times(gtfs_info):

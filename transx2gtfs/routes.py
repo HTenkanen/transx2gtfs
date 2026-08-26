@@ -4,17 +4,24 @@ import pandas as pd
 
 
 def get_mode(mode):
-    """Parse mode from TransXChange value"""
-    if mode in ["tram", "trolleyBus"]:
-        return 0
-    elif mode in ["underground", "metro"]:
-        return 1
-    elif mode == "rail":
-        return 2
-    elif mode in ["bus", "coach"]:
+    """Parse mode from TransXChange value; a missing mode is treated as bus"""
+    if mode is None or mode == "":
+        warnings.warn("Service has no Mode, assuming bus.", UserWarning, stacklevel=2)
         return 3
-    elif mode == "ferry":
+    key = mode.strip().lower()
+    if key in ("tram",):
+        return 0
+    elif key in ("underground", "metro"):
+        return 1
+    elif key == "rail":
+        return 2
+    elif key in ("bus", "coach"):
+        return 3
+    elif key == "ferry":
         return 4
+    elif key == "trolleybus":
+        return 11
+    raise ValueError("Unknown Mode '%s'." % mode)
 
 
 def get_routes(gtfs_info, doc):

@@ -5,6 +5,31 @@ from transx2gtfs.calendar_dates import get_calendar_dates_exceptions
 from transx2gtfs.stop_times import generate_service_id, get_direction
 from transx2gtfs.routes import get_mode
 
+DEFAULT_WEEKDAYS = "MondayToSunday"
+OPERATING_PERIOD_DEFAULT_DAYS = 365
+
+
+def parse_date(text):
+    return datetime.strptime(text.strip()[:10], "%Y-%m-%d").date()
+
+
+def gtfs_date(day):
+    return day.strftime("%Y%m%d")
+
+
+def service_end_date(doc, service, start):
+    """
+    End of the operating period: the service's EndDate, or one year after the
+    latest of its StartDate and the document's creation/modification dates.
+    """
+    if service.end_date:
+        return parse_date(service.end_date)
+    latest = start
+    for stamp in (doc.creation_date_time, doc.modification_date_time):
+        if stamp:
+            latest = max(latest, parse_date(stamp))
+    return latest + timedelta(days=OPERATING_PERIOD_DEFAULT_DAYS)
+
 
 def get_last_stop_time_info(
     link, hour, current_date, current_dt, duration, stop_num, boarding_time
@@ -113,9 +138,10 @@ def process_vehicle_journeys(doc, service_jp_info):
             )
         service_profile = service_profiles[service_ref]
 
+        # A journey without any day information runs every day
         weekdays = get_weekday_info(journey.operating_profile)
         if weekdays is None:
-            weekdays = get_weekday_info(service_profile)
+            weekdays = get_weekday_info(service_profile) or DEFAULT_WEEKDAYS
 
         non_operative_days = get_calendar_dates_exceptions(journey.operating_profile)
         if non_operative_days is None:
@@ -143,6 +169,7 @@ def process_vehicle_journeys(doc, service_jp_info):
             "agency_id",
             "route_id",
             "direction_id",
+            "direction",
             "line_name",
             "travel_mode",
             "trip_headsign",
@@ -154,6 +181,7 @@ def process_vehicle_journeys(doc, service_jp_info):
             agency_id,
             route_id,
             direction_id,
+            direction,
             line_name,
             travel_mode,
             trip_headsign,
@@ -180,6 +208,7 @@ def process_vehicle_journeys(doc, service_jp_info):
             vehicle_journey_id=vehicle_journey_id,
             service_ref=service_ref,
             direction_id=direction_id,
+            direction=direction,
             line_name=line_name,
             travel_mode=travel_mode,
             trip_headsign=trip_headsign,
@@ -364,12 +393,6 @@ def _require(value, what):
     return value
 
 
-def _gtfs_date(value, what):
-    return datetime.strftime(
-        datetime.strptime(_require(value, what), "%Y-%m-%d"), "%Y%m%d"
-    )
-
-
 def get_service_journey_pattern_info(doc):
     """Retrieve a DataFrame of all Journey Pattern info of services"""
     rows = []
@@ -378,16 +401,18 @@ def get_service_journey_pattern_info(doc):
         service_code = service.code
         what = "Service '%s'" % service_code
 
-        # Service description
-        service_description = _require(service.description, what + " Description")
+        # Service description (optional in 2.4 files; an internal column only)
+        service_description = service.description or ""
 
         # Travel mode
-        mode = get_mode(_require(service.mode, what + " Mode"))
+        mode = get_mode(service.mode)
 
         # Line name
         if not service.lines:
             raise ValueError(what + " has no Line.")
-        line_name = _require(service.lines[0].name, what + " LineName")
+        for line in service.lines:
+            _require(line.name, "%s Line '%s' LineName" % (what, line.id))
+        line_name = service.lines[0].name
 
         # Operator reference code
         agency_id = _require(
@@ -395,8 +420,9 @@ def get_service_journey_pattern_info(doc):
         )
 
         # Start and end date
-        start_date = _gtfs_date(service.start_date, what + " OperatingPeriod/StartDate")
-        end_date = _gtfs_date(service.end_date, what + " OperatingPeriod/EndDate")
+        start = parse_date(_require(service.start_date, what + " StartDate"))
+        end = service_end_date(doc, service, start)
+        start_date, end_date = gtfs_date(start), gtfs_date(end)
 
         for jp in service.journey_patterns:
 
@@ -410,7 +436,8 @@ def get_service_journey_pattern_info(doc):
             section_ref = "|".join(jp.section_refs)
 
             # Direction
-            direction = get_direction(_require(jp.direction, jp_what + " Direction"))
+            raw_direction = _require(jp.direction, jp_what + " Direction")
+            direction = get_direction(raw_direction)
 
             # Headsign
             if direction == 0:
@@ -435,6 +462,7 @@ def get_service_journey_pattern_info(doc):
                     # Links to trips
                     jp_section_reference=section_ref,
                     direction_id=direction,
+                    direction=raw_direction,
                     # Route_id linking to routes
                     route_id=route_ref,
                     vehicle_type=vehicle_type,

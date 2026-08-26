@@ -17,21 +17,32 @@ def get_agency_url(operator_code):
     return operator_urls.get(operator_code, "NA")
 
 
+def get_agency_name(operator):
+    """Operator name: trading name, else name on licence, short name or code"""
+    name = (
+        operator.trading_name
+        or operator.name_on_licence
+        or operator.short_name
+        or operator.code
+    )
+    if name is None:
+        raise ValueError("Operator '%s' does not have a name." % operator.id)
+    return name
+
+
 def get_agency(doc):
-    """Parse agency information from the first Operator of a TxcDocument"""
+    """Parse agency information from the Operators of a TxcDocument"""
     if not doc.operators:
         raise ValueError("TransXChange document does not contain an Operator.")
-    operator = doc.operators[0]
-    agency_id = operator.id
-    agency_name = operator.name_on_licence or operator.short_name or operator.code
-    if agency_name is None:
-        raise ValueError("Operator '%s' does not have a name." % agency_id)
-
-    agency = dict(
-        agency_id=agency_id,
-        agency_name=agency_name,
-        agency_url=get_agency_url(agency_id),
-        agency_timezone="Europe/London",
-        agency_lang="en",
-    )
-    return pd.DataFrame([agency])
+    rows = []
+    for operator in doc.operators:
+        rows.append(
+            dict(
+                agency_id=operator.id,
+                agency_name=get_agency_name(operator),
+                agency_url=get_agency_url(operator.id),
+                agency_timezone="Europe/London",
+                agency_lang="en",
+            )
+        )
+    return pd.DataFrame(rows)
