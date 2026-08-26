@@ -1,11 +1,22 @@
+import hashlib
+
+import pandas as pd
+
+DIRECTIONS = {
+    "inbound": 0,
+    "outbound": 1,
+    "inboundAndOutbound": 0,
+    "circular": 0,
+    "clockwise": 0,
+    "antiClockwise": 0,
+}
+
+
 def get_direction(direction_id):
     """Return boolean direction id"""
-    if direction_id == "inbound":
-        return 0
-    elif direction_id == "outbound":
-        return 1
-    else:
-        raise ValueError("Cannot determine direction from %s" % direction_id)
+    if direction_id in DIRECTIONS:
+        return DIRECTIONS[direction_id]
+    raise ValueError("Cannot determine direction from %s" % direction_id)
 
 
 def get_stop_times(gtfs_info):
@@ -40,34 +51,56 @@ def get_stop_times(gtfs_info):
     return stop_times[stops_per_trip > 1].reset_index(drop=True)
 
 
+def get_frequencies(gtfs_info):
+    """frequencies.txt rows for frequency-based journeys, or None"""
+    if "frequency_end_time" not in gtfs_info.columns:
+        return None
+    trips = gtfs_info.dropna(subset=["frequency_end_time"]).drop_duplicates("trip_id")
+    if len(trips) == 0:
+        return None
+    frequencies = pd.DataFrame(
+        {
+            "trip_id": trips["trip_id"].to_list(),
+            "start_time": trips["frequency_start_time"].to_list(),
+            "end_time": trips["frequency_end_time"].to_list(),
+            "headway_secs": trips["frequency_headway_secs"].astype(int).to_list(),
+            "exact_times": 0,
+        }
+    )
+    return frequencies
+
+
+def make_service_id(service_ref, start_date, end_date, weekdays, exceptions):
+    """
+    service_id of a calendar: '<service>_<start>_<end>_<weekdays>', with a short
+    hash of the encoded exceptions appended when the calendar has exceptions.
+    """
+    service_id = "%s_%s_%s_%s" % (service_ref, start_date, end_date, weekdays)
+    if exceptions:
+        service_id = "%s_%s" % (service_id, exceptions_digest(exceptions))
+    return service_id
+
+
+def exceptions_digest(exceptions):
+    """Short stable hash of an encoded exception list"""
+    return hashlib.sha1(exceptions.encode("utf-8")).hexdigest()[:8]
+
+
 def generate_service_id(stop_times):
     """Generate service_id into stop_times DataFrame"""
-
-    # Create column for service_id
-    stop_times["service_id"] = None
-
-    # Parse calendar info
-    calendar_info = stop_times.drop_duplicates(subset=["vehicle_journey_id"])
-
-    # Group by weekdays
-    calendar_groups = calendar_info.groupby("weekdays")
-
-    # Iterate over groups and create a service_id
-    for _, cgroup in calendar_groups:
-        # Parse all vehicle journey ids
-        vehicle_journey_ids = cgroup["vehicle_journey_id"].to_list()
-
-        # Parse other items
-        service_ref = cgroup["service_ref"].unique()[0]
-        daygroup = cgroup["weekdays"].unique()[0]
-        start_d = cgroup["start_date"].unique()[0]
-        end_d = cgroup["end_date"].unique()[0]
-
-        # Generate service_id
-        service_id = "%s_%s_%s_%s" % (service_ref, start_d, end_d, daygroup)
-
-        # Update stop_times service_id
-        stop_times.loc[
-            stop_times["vehicle_journey_id"].isin(vehicle_journey_ids), "service_id"
-        ] = service_id
+    exceptions = (
+        stop_times["exceptions"]
+        if "exceptions" in stop_times.columns
+        else pd.Series("", index=stop_times.index)
+    )
+    stop_times["service_id"] = [
+        make_service_id(service_ref, start, end, weekdays, exc)
+        for service_ref, start, end, weekdays, exc in zip(
+            stop_times["service_ref"],
+            stop_times["start_date"],
+            stop_times["end_date"],
+            stop_times["weekdays"],
+            exceptions.fillna(""),
+        )
+    ]
     return stop_times
