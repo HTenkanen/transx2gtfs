@@ -128,10 +128,13 @@ newer revision of the same service) and `--version`.
 
 ### Stop and bank holiday data
 
-Stop coordinates are read from the national NaPTAN dataset, which is downloaded once
-(about 100 MB) into the system temp directory and reused on later runs. To use a local copy
-instead (for example when working offline), point `TRANSX2GTFS_NAPTAN_PATH` at a NaPTAN CSV
-file downloaded from https://naptan.api.dft.gov.uk/v1/access-nodes?dataFormat=csv.
+Stop coordinates are read from the national NaPTAN dataset, which is downloaded (about
+100 MB) into the user's cache directory (`~/.cache/transx2gtfs` or `$XDG_CACHE_HOME/transx2gtfs` on Linux,
+`~/Library/Caches/transx2gtfs` on macOS, `%LOCALAPPDATA%\transx2gtfs` on Windows; override
+with `TRANSX2GTFS_CACHE_DIR`), reused on later runs and refreshed when older than 30 days (if
+the refresh fails, the cached copy is used with a warning). To use a local copy instead (for
+example when working offline), point `TRANSX2GTFS_NAPTAN_PATH` at a NaPTAN CSV file downloaded
+from https://naptan.api.dft.gov.uk/v1/access-nodes?dataFormat=csv.
 Bank holidays are read from [gov.uk](https://www.gov.uk/bank-holidays.json), falling back to a
 copy bundled with the package; `TRANSX2GTFS_BANK_HOLIDAYS_PATH` can point at a local copy of
 that JSON file.
