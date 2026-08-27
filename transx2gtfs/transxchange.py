@@ -69,6 +69,83 @@ def service_end_date(doc, service, start):
     return latest + timedelta(days=OPERATING_PERIOD_DEFAULT_DAYS)
 
 
+# Vehicle journeys
+# ----------------
+
+
+def resolve_vehicle_journey(doc, journey, _index=None, _memo=None):
+    """
+    A journey with a VehicleJourneyRef inherits everything it does not set from
+    the referenced journey (transitively). Returns a resolved copy. ``_index``
+    (code -> journey) and ``_memo`` (code -> resolved journey) let a conversion
+    resolve every journey of a document once.
+    """
+    if journey.vehicle_journey_ref is None:
+        return journey
+    if _index is None:
+        _index = {j.code: j for j in doc.vehicle_journeys}
+    if _memo is None:
+        _memo = {}
+    # Follow the chain (without recursion) until a resolved or root journey
+    chain = [journey]
+    seen = {journey.code}
+    current = journey
+    while current.vehicle_journey_ref is not None and current.code not in _memo:
+        ref = current.vehicle_journey_ref
+        if ref in seen:
+            raise ValueError(
+                "VehicleJourney '%s' has a circular VehicleJourneyRef." % journey.code
+            )
+        current = _index.get(ref)
+        if current is None:
+            raise ValueError(
+                "VehicleJourney '%s' refers to unknown VehicleJourney '%s'."
+                % (chain[-1].code, ref)
+            )
+        seen.add(current.code)
+        chain.append(current)
+    resolved = _memo.get(chain[-1].code, chain[-1])
+    _memo[chain[-1].code] = resolved
+    for child in reversed(chain[:-1]):
+        inherited = {}
+        for name in (
+            "journey_pattern_ref",
+            "departure_time",
+            "operating_profile",
+            "line_ref",
+            "operator_ref",
+            "frequency",
+        ):
+            if getattr(child, name) is None:
+                inherited[name] = getattr(resolved, name)
+        inherited["timing_links"] = _merge_timing_links(
+            resolved.timing_links, child.timing_links
+        )
+        resolved = dataclasses.replace(child, vehicle_journey_ref=None, **inherited)
+        _memo[child.code] = resolved
+    return resolved
+
+
+def _merge_timing_links(parent_links, child_links):
+    """Timing-link overrides of a journey on top of the referenced journey's:
+    per link, the child's values win and its unset fields are inherited"""
+    if not child_links:
+        return parent_links
+    merged = {tl.journey_pattern_timing_link_ref: tl for tl in parent_links}
+    for child in child_links:
+        ref = child.journey_pattern_timing_link_ref
+        parent = merged.get(ref)
+        if parent is not None:
+            child = dataclasses.replace(
+                child,
+                run_time=child.run_time or parent.run_time,
+                from_wait_time=child.from_wait_time or parent.from_wait_time,
+                to_wait_time=child.to_wait_time or parent.to_wait_time,
+            )
+        merged[ref] = child
+    return list(merged.values())
+
+
 # Calendars
 # ---------
 
@@ -412,8 +489,11 @@ def process_vehicle_journeys(doc, service_jp_info):
     journey_cnt = len(vjourneys)
 
     # Service-level operating profiles as fallback, and the bank holidays
+    services = {service.code: service for service in doc.services}
     service_profiles = _service_profiles(doc)
     calendars = _Calendars(doc)
+    journey_index = {j.code: j for j in vjourneys}
+    resolved = {}
 
     # Container for gtfs_info rows
     rows = []
@@ -422,6 +502,9 @@ def process_vehicle_journeys(doc, service_jp_info):
     for i, journey in enumerate(vjourneys):
         if i != 0 and i % 50 == 0:
             print("Processed %s / %s journeys." % (i, journey_cnt))
+
+        journey = resolve_vehicle_journey(doc, journey, journey_index, resolved)
+
         # Get service reference
         service_ref = journey.service_ref
 
@@ -435,6 +518,15 @@ def process_vehicle_journeys(doc, service_jp_info):
             raise ValueError(
                 "VehicleJourney '%s' refers to unknown Service '%s'."
                 % (vehicle_journey_id, service_ref)
+            )
+        service = services[service_ref]
+        if journey_pattern_id is None:
+            raise ValueError(
+                "VehicleJourney '%s' has no JourneyPatternRef." % vehicle_journey_id
+            )
+        if journey.departure_time is None:
+            raise ValueError(
+                "VehicleJourney '%s' has no DepartureTime." % vehicle_journey_id
             )
 
         # Operating profile of the journey, completed from its service's
@@ -488,6 +580,20 @@ def process_vehicle_journeys(doc, service_jp_info):
         # Ensure integer values
         direction_id = int(direction_id)
         travel_mode = int(travel_mode)
+
+        if journey.operator_ref not in (
+            None,
+            "",
+            agency_id,
+            service.registered_operator_ref,
+        ):
+            warnings.warn(
+                "VehicleJourney '%s' names operator '%s'; the route keeps its "
+                "service's operator '%s'."
+                % (vehicle_journey_id, journey.operator_ref, agency_id),
+                UserWarning,
+                stacklevel=2,
+            )
 
         # Operating period, weekdays and exceptions of the journey
         service_period = (start_date, end_date)

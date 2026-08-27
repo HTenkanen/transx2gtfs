@@ -1172,3 +1172,175 @@ def test_non_finite_distances_fall_back_to_equal_spacing():
     )
     t = tables(document(links=links, route_sections=sections))
     assert [a for a, _ in arrivals(t)] == ["08:00:00", "08:05:00", "08:10:00"]
+
+
+# Journey references ---------------------------------------------------------------
+
+
+def test_vehicle_journey_ref_inherits_from_the_referenced_journey():
+    journeys = [
+        journey("VJ_1", profile=profile("<Saturday />")),
+        journey(
+            "VJ_2",
+            departure="09:30:00",
+            pattern=None,
+            extra="<VehicleJourneyRef>VJ_1</VehicleJourneyRef>",
+        ),
+    ]
+    t = tables(document(journeys=journeys))
+    by_trip = t["stop_times"].groupby("trip_id")["arrival_time"].first()
+    assert by_trip.to_dict() == {
+        "JPS_1_Saturday_0800": "08:00:00",
+        "JPS_1_Saturday_0930": "09:30:00",
+    }
+    assert set(t["trips"]["service_id"]) == {"S1_20270104_20270331_Saturday"}
+    # what the referencing journey sets itself wins
+    journeys[1] = journey(
+        "VJ_2",
+        departure="09:30:00",
+        pattern=None,
+        profile=profile("<Sunday />"),
+        extra="<VehicleJourneyRef>VJ_1</VehicleJourneyRef>",
+    )
+    t = tables(document(journeys=journeys))
+    assert sorted(t["trips"]["service_id"]) == [
+        "S1_20270104_20270331_Saturday",
+        "S1_20270104_20270331_Sunday",
+    ]
+
+
+def test_vehicle_journey_ref_without_departure_time_and_cycles():
+    inherit_all = journey(
+        "VJ_2",
+        departure=None,
+        pattern=None,
+        extra="<VehicleJourneyRef>VJ_1</VehicleJourneyRef>",
+    )
+    t = tables(document(journeys=[journey("VJ_1"), inherit_all]))
+    assert len(t["trips"]) == 1  # same pattern, days and time: one trip
+
+    cycle = [
+        journey(
+            "VJ_1",
+            departure=None,
+            pattern=None,
+            extra="<VehicleJourneyRef>VJ_2</VehicleJourneyRef>",
+        ),
+        journey(
+            "VJ_2",
+            departure=None,
+            pattern=None,
+            extra="<VehicleJourneyRef>VJ_1</VehicleJourneyRef>",
+        ),
+    ]
+    with pytest.raises(ValueError, match="circular VehicleJourneyRef"):
+        tables(document(journeys=cycle))
+
+    unknown = journey(
+        "VJ_1",
+        departure=None,
+        pattern=None,
+        extra="<VehicleJourneyRef>VJ_9</VehicleJourneyRef>",
+    )
+    with pytest.raises(ValueError, match="unknown VehicleJourney 'VJ_9'"):
+        tables(document(journeys=[unknown]))
+
+    with pytest.raises(ValueError, match="missing required element DepartureTime"):
+        read_txc(document(journeys=[journey("VJ_1", departure=None)]))
+    # a reference chain that never provides a pattern or a departure time
+    no_pattern = journey("VJ_1", pattern=None)
+    with pytest.raises(ValueError, match="'VJ_1' has no JourneyPatternRef"):
+        tables(document(journeys=[no_pattern]))
+    chain = [
+        journey(
+            "VJ_1", departure=None, extra="<VehicleJourneyRef>VJ_2</VehicleJourneyRef>"
+        ),
+        journey(
+            "VJ_2", departure=None, extra="<VehicleJourneyRef>VJ_3</VehicleJourneyRef>"
+        ),
+        journey(
+            "VJ_3", departure=None, extra="<VehicleJourneyRef>VJ_1</VehicleJourneyRef>"
+        ),
+    ]
+    with pytest.raises(ValueError, match="circular VehicleJourneyRef"):
+        tables(document(journeys=chain))
+
+
+def test_timing_link_overrides_are_merged_per_link_along_references():
+    def override(ref, run=None, to_wait=None):
+        return (
+            "<VehicleJourneyTimingLink>"
+            "<JourneyPatternTimingLinkRef>%s</JourneyPatternTimingLinkRef>%s%s"
+            "</VehicleJourneyTimingLink>"
+            % (
+                ref,
+                "<RunTime>%s</RunTime>" % run if run else "",
+                "<To><WaitTime>%s</WaitTime></To>" % to_wait if to_wait else "",
+            )
+        )
+
+    parent = journey("VJ_1", extra=override("JPL_1", run="PT8M", to_wait="PT1M"))
+    # the child overrides link 2 only: link 1 keeps the parent's override
+    child = journey(
+        "VJ_2",
+        departure="09:00:00",
+        pattern=None,
+        extra="<VehicleJourneyRef>VJ_1</VehicleJourneyRef>" + override("JPL_2", "PT9M"),
+    )
+    t = tables(document(journeys=[parent, child]))
+    by_trip = t["stop_times"].groupby("trip_id")["arrival_time"].apply(list)
+    assert sorted(by_trip.to_list()) == [
+        ["08:00:00", "08:08:00", "08:16:00"],
+        ["09:00:00", "09:08:00", "09:18:00"],
+    ]
+    # a partial override of the same link inherits the parent's other fields
+    child = journey(
+        "VJ_2",
+        departure="09:00:00",
+        pattern=None,
+        extra="<VehicleJourneyRef>VJ_1</VehicleJourneyRef>" + override("JPL_1", "PT6M"),
+    )
+    t = tables(document(journeys=[parent, child]))
+    rows = t["stop_times"][t["stop_times"]["trip_id"].str.contains("_0900")]
+    assert rows[["arrival_time", "departure_time"]].values.tolist() == [
+        ["09:00:00", "09:00:00"],
+        ["09:06:00", "09:07:00"],  # run overridden, the To wait inherited
+        ["09:14:00", "09:14:00"],
+    ]
+
+
+def test_long_reference_chains_resolve_without_recursion():
+    journeys = [journey("VJ_0", profile=profile("<Saturday />"))]
+    for i in range(1, 3000):
+        journeys.append(
+            journey(
+                "VJ_%d" % i,
+                departure=None,
+                pattern=None,
+                extra="<VehicleJourneyRef>VJ_%d</VehicleJourneyRef>" % (i - 1),
+            )
+        )
+    t = tables(document(journeys=journeys))
+    assert len(t["trips"]) == 1  # all inherit pattern, time and days: one trip
+
+
+def test_journey_operator_other_than_the_service_operator_warns():
+    other = journey("VJ_1", extra="<OperatorRef>OId_OTHER</OperatorRef>")
+    with pytest.warns(UserWarning, match="names operator 'OId_OTHER'"):
+        t = tables(document(journeys=[other]))
+    assert t["routes"]["agency_id"].to_list() == ["OId_CV"]
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        same = journey("VJ_1", extra="<OperatorRef>OId_CV</OperatorRef>")
+        tables(document(journeys=[same]))
+    # warned even for a journey that never operates
+    never = journey(
+        "VJ_1",
+        profile=profile(
+            special_days=special(non_operation=[("2026-12-01", "2027-04-30")])
+        ),
+        extra="<OperatorRef>OId_OTHER</OperatorRef>",
+    )
+    with pytest.warns(UserWarning, match="names operator 'OId_OTHER'"):
+        with pytest.warns(UserWarning, match="never operates"):
+            tables(document(journeys=[never, journey("VJ_2")]))
