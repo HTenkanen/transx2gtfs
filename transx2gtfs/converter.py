@@ -47,7 +47,7 @@ import sqlite3
 import os
 import multiprocessing
 from transx2gtfs.stop_times import get_stop_times, get_frequencies
-from transx2gtfs.stops import get_stops, ensure_naptan_data
+from transx2gtfs.stops import get_stops, ensure_naptan_data, set_naptan_path
 from transx2gtfs.bank_holidays import (
     remove_bank_holidays_snapshot,
     set_bank_holidays_path,
@@ -135,11 +135,13 @@ def select_files(files):
     return selection.kept
 
 
-def _init_worker(lock, bank_holidays_path=None):
+def _init_worker(lock, bank_holidays_path=None, naptan_path=None):
     global _db_lock
     _db_lock = lock
     if bank_holidays_path is not None:
         set_bank_holidays_path(bank_holidays_path)
+    if naptan_path is not None:
+        set_naptan_path(naptan_path)
 
 
 def process_files(parallel):
@@ -264,6 +266,8 @@ def convert(
     worker_cnt=None,
     file_size_limit=2000,
     skip_superseded=True,
+    naptan_path=None,
+    refresh_naptan=False,
 ):
     """
     Converts TransXchange formatted schedule data into GTFS feed.
@@ -290,6 +294,13 @@ def convert(
         several revisions): per ServiceCode, among versions whose operating
         periods overlap only the highest RevisionNumber is converted. Dropped
         files are printed.
+    naptan_path : str (default is None)
+        Local NaPTAN CSV to read stop coordinates from. By default
+        ``TRANSX2GTFS_NAPTAN_PATH`` is used if set, else a copy downloaded into
+        the user's cache directory (refreshed when older than 30 days).
+    refresh_naptan : bool (default is False)
+        Download the NaPTAN data anew even if the cached copy is recent. Has no
+        effect on a file given with ``naptan_path`` or the environment.
     """
     # Total start
     tot_start_t = timeit()
@@ -312,9 +323,10 @@ def convert(
     if skip_superseded:
         files = select_files(files)
 
-    # Make sure the NaPTAN stop data and one immutable bank holiday snapshot are
-    # available before the workers start; the snapshot only lives while they run
-    ensure_naptan_data()
+    # Resolve the NaPTAN stop data once and take one immutable bank holiday
+    # snapshot before the workers start; both are handed to the workers, and
+    # the snapshot only lives while they run
+    naptan_file = ensure_naptan_data(naptan_path, refresh=refresh_naptan)
     rows_before = _row_count(gtfs_db, "stop_times")
     snapshot = snapshot_bank_holidays_data()
     try:
@@ -334,12 +346,13 @@ def convert(
         with multiprocessing.Pool(
             processes=len(workers),
             initializer=_init_worker,
-            initargs=(lock, snapshot),
+            initargs=(lock, snapshot, naptan_file),
         ) as pool:
             pool.map(process_files, workers)
     finally:
         # An in-process pool runs the initializer in this process
         set_bank_holidays_path(None)
+        set_naptan_path(None)
         remove_bank_holidays_snapshot(snapshot)
 
     # Print information about the total time

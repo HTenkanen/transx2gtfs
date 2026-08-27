@@ -42,6 +42,18 @@ def build_parser():
         "of the same service (by default only the current version is converted)",
     )
     parser.add_argument(
+        "--naptan-path",
+        default=None,
+        help="local NaPTAN CSV to read stop coordinates from (default: "
+        "TRANSX2GTFS_NAPTAN_PATH if set, else a copy downloaded into the user's "
+        "cache directory and refreshed monthly)",
+    )
+    parser.add_argument(
+        "--refresh-naptan",
+        action="store_true",
+        help="download the NaPTAN data anew even if the cached copy is recent",
+    )
+    parser.add_argument(
         "--version", action="version", version=f"%(prog)s {__version__}"
     )
     return parser
@@ -56,6 +68,8 @@ def main(argv=None):
         worker_cnt=args.workers,
         file_size_limit=args.file_size_limit,
         skip_superseded=not args.keep_superseded,
+        naptan_path=args.naptan_path,
+        refresh_naptan=args.refresh_naptan,
     )
 
 

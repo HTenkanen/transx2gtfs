@@ -1652,10 +1652,11 @@ def test_convert_removes_its_snapshot_and_leaves_the_environment_alone(
 
 def test_convert_resets_the_override_of_an_in_process_pool(monkeypatch, tmp_path):
     from transx2gtfs import bank_holidays as bh_module
-    from transx2gtfs import converter
+    from transx2gtfs import converter, stops
 
     monkeypatch.setattr(bh_module.tempfile, "gettempdir", lambda: str(tmp_path))
     seen = []
+    seen_naptan = []
 
     class InProcessPool:
         """A pool running the initializer and the work in the calling process"""
@@ -1663,6 +1664,7 @@ def test_convert_resets_the_override_of_an_in_process_pool(monkeypatch, tmp_path
         def __init__(self, processes, initializer, initargs):
             initializer(*initargs)
             seen.append(bh_module._bank_holidays_override)
+            seen_naptan.append(stops._naptan_override)
 
         def __enter__(self):
             return self
@@ -1684,6 +1686,9 @@ def test_convert_resets_the_override_of_an_in_process_pool(monkeypatch, tmp_path
     assert seen and seen[0].startswith(str(tmp_path))
     assert bh_module._bank_holidays_override is None
     assert list(tmp_path.glob("transx2gtfs-*")) == []
+    # the workers were handed the resolved NaPTAN file; the override is cleared
+    assert seen_naptan == [str(DATA_DIR / "naptan_subset.csv")]
+    assert stops._naptan_override is None
     # the same after a failure inside the pool
     monkeypatch.setattr(InProcessPool, "map", lambda self, f, items: 1 / 0)
     with pytest.raises(ZeroDivisionError):
@@ -1693,6 +1698,7 @@ def test_convert_resets_the_override_of_an_in_process_pool(monkeypatch, tmp_path
                 str(tmp_path / "in"), str(tmp_path / "gtfs.zip"), worker_cnt=1
             )
     assert bh_module._bank_holidays_override is None
+    assert stops._naptan_override is None
     assert list(tmp_path.glob("transx2gtfs-*")) == []
 
 
@@ -1820,3 +1826,78 @@ def test_files_whose_header_cannot_be_read_are_kept(tmp_path, capsys):
     broken.write_bytes(b"<TransXChange><Services><Service>")
     assert select_files([str(good), str(broken)]) == [str(good), str(broken)]
     assert "Could not read the header of broken.xml" in capsys.readouterr().out
+
+
+# NaPTAN options -------------------------------------------------------------------
+
+
+def test_convert_reads_stops_from_the_given_naptan_file(tmp_path, monkeypatch):
+    from transx2gtfs import stops
+
+    own = tmp_path / "own.csv"
+    own.write_bytes((DATA_DIR / "naptan_subset.csv").read_bytes())
+    folder = tmp_path / "in"
+    folder.mkdir()
+    (folder / "some.xml").write_bytes(document())
+    output = str(tmp_path / "gtfs.zip")
+    # the argument wins over an environment pointing at a missing file
+    monkeypatch.setenv("TRANSX2GTFS_NAPTAN_PATH", str(tmp_path / "missing.csv"))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        transx2gtfs.convert(str(folder), output, worker_cnt=1, naptan_path=str(own))
+    with ZipFile(output) as zf:
+        stops_txt = pd.read_csv(io.BytesIO(zf.read("stops.txt")), dtype=str)
+    assert len(stops_txt) == 3
+    assert stops._naptan_override is None
+    with pytest.raises(FileNotFoundError, match="does not exist"):
+        transx2gtfs.convert(str(folder), output, worker_cnt=1)
+
+
+def test_convert_refreshes_the_cached_naptan_data_on_request(tmp_path, monkeypatch):
+    from transx2gtfs import stops
+
+    monkeypatch.delenv("TRANSX2GTFS_NAPTAN_PATH")
+    monkeypatch.setenv("TRANSX2GTFS_CACHE_DIR", str(tmp_path / "cache"))
+    calls = []
+
+    def fake_download(target_file, url=stops.NAPTAN_URL):
+        calls.append(target_file)
+        os.makedirs(os.path.dirname(target_file), exist_ok=True)
+        with open(target_file, "wb") as f:
+            f.write((DATA_DIR / "naptan_subset.csv").read_bytes())
+        return target_file
+
+    monkeypatch.setattr(stops, "download_naptan", fake_download)
+    folder = tmp_path / "in"
+    folder.mkdir()
+    (folder / "some.xml").write_bytes(document())
+    output = str(tmp_path / "gtfs.zip")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        transx2gtfs.convert(str(folder), output, worker_cnt=1)
+        assert len(calls) == 1  # downloaded once
+        transx2gtfs.convert(str(folder), output, worker_cnt=1)
+        assert len(calls) == 1  # fresh: reused
+        transx2gtfs.convert(str(folder), output, worker_cnt=1, refresh_naptan=True)
+        assert len(calls) == 2  # forced
+
+
+def test_cli_naptan_options(tmp_path):
+    from transx2gtfs.__main__ import build_parser, main
+
+    args = build_parser().parse_args(["in", "out"])
+    assert (args.naptan_path, args.refresh_naptan) == (None, False)
+    args = build_parser().parse_args(
+        ["in", "out", "--naptan-path", "stops.csv", "--refresh-naptan"]
+    )
+    assert (args.naptan_path, args.refresh_naptan) == ("stops.csv", True)
+    own = tmp_path / "own.csv"
+    own.write_bytes((DATA_DIR / "naptan_subset.csv").read_bytes())
+    folder = tmp_path / "in"
+    folder.mkdir()
+    (folder / "some.xml").write_bytes(document())
+    output = str(tmp_path / "gtfs.zip")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        main([str(folder), output, "--workers", "1", "--naptan-path", str(own)])
+    assert os.path.isfile(output)
