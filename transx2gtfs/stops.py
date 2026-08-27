@@ -1,13 +1,21 @@
+import http.client
 import os
+import sys
 import tempfile
+import time
 import urllib.request
 import warnings
+from datetime import datetime
+from urllib.error import URLError
 
 import pandas as pd
 from pyproj import Transformer
 
 NAPTAN_URL = "https://naptan.api.dft.gov.uk/v1/access-nodes?dataFormat=csv"
 NAPTAN_PATH_ENV = "TRANSX2GTFS_NAPTAN_PATH"
+CACHE_DIR_ENV = "TRANSX2GTFS_CACHE_DIR"
+# A cached NaPTAN download older than this is refreshed (NaPTAN changes weekly)
+NAPTAN_MAX_AGE_DAYS = 30
 
 _naptan_columns = {
     "ATCOCode": "stop_id",
@@ -17,17 +25,38 @@ _naptan_columns = {
 }
 _stop_columns = ["stop_id", "stop_name", "stop_lat", "stop_lon"]
 
-# One NaPTAN frame per process, keyed by (path, mtime)
+# One NaPTAN frame per process, keyed by (path, mtime_ns, size)
 _naptan_cache = {}
 _osgb36_to_wgs84 = None
 
 
+def cache_dir():
+    """
+    Directory for downloaded data: ``TRANSX2GTFS_CACHE_DIR`` if set, else the
+    user's cache directory (``$XDG_CACHE_HOME`` or ``~/.cache`` on Linux,
+    ``~/Library/Caches`` on macOS, ``%LOCALAPPDATA%`` on Windows) plus
+    ``transx2gtfs``.
+    """
+    override = os.environ.get(CACHE_DIR_ENV)
+    if override:
+        return override
+    home = os.path.expanduser("~")
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or os.path.join(home, "AppData", "Local")
+    elif sys.platform == "darwin":
+        base = os.path.join(home, "Library", "Caches")
+    else:
+        base = os.environ.get("XDG_CACHE_HOME") or os.path.join(home, ".cache")
+    return os.path.join(base, "transx2gtfs")
+
+
 def default_naptan_path():
-    return os.path.join(tempfile.gettempdir(), "transx2gtfs", "naptan.csv")
+    """The cached NaPTAN download"""
+    return os.path.join(cache_dir(), "naptan.csv")
 
 
 def get_naptan_path():
-    """Local NaPTAN CSV: TRANSX2GTFS_NAPTAN_PATH if set, else the temp cache."""
+    """Local NaPTAN CSV: TRANSX2GTFS_NAPTAN_PATH if set, else the cached download."""
     return os.environ.get(NAPTAN_PATH_ENV) or default_naptan_path()
 
 
@@ -52,13 +81,45 @@ def download_naptan(target_file, url=NAPTAN_URL):
     return target_file
 
 
-def ensure_naptan_data(naptan_fp=None):
-    """Return the path of a local NaPTAN CSV, downloading it once if needed."""
+def _is_stale(path):
+    age = time.time() - os.path.getmtime(path)
+    return age > NAPTAN_MAX_AGE_DAYS * 24 * 3600
+
+
+def ensure_naptan_data(naptan_fp=None, refresh=False):
+    """
+    Return the path of a local NaPTAN CSV. A file given explicitly (or through
+    ``TRANSX2GTFS_NAPTAN_PATH``) is used as it is and must exist. The cached
+    download is fetched when missing, older than ``NAPTAN_MAX_AGE_DAYS`` or
+    when ``refresh`` is set; if a refresh fails the cached copy is used with a
+    warning.
+    """
+    # Only the download this package manages is ever (re)fetched: a path given
+    # by the caller or the environment is used as it is, whatever it points at
     if naptan_fp is None:
-        naptan_fp = get_naptan_path()
+        naptan_fp = os.environ.get(NAPTAN_PATH_ENV)
+        managed = not naptan_fp
+        if managed:
+            naptan_fp = default_naptan_path()
+    else:
+        managed = False
+    if managed and os.path.islink(naptan_fp):
+        raise OSError("Refusing to use symlink '%s' as NaPTAN data" % naptan_fp)
     if os.path.exists(naptan_fp):
-        return naptan_fp
-    if naptan_fp != default_naptan_path():
+        if not managed or not (refresh or _is_stale(naptan_fp)):
+            return naptan_fp
+        try:
+            return download_naptan(naptan_fp)
+        except (URLError, OSError, http.client.HTTPException) as error:
+            downloaded = datetime.fromtimestamp(os.path.getmtime(naptan_fp))
+            warnings.warn(
+                "Could not download the NaPTAN stops (%s); using the copy from %s."
+                % (error, downloaded.strftime("%Y-%m-%d")),
+                UserWarning,
+                stacklevel=2,
+            )
+            return naptan_fp
+    if not managed:
         raise FileNotFoundError("NaPTAN file '%s' does not exist." % naptan_fp)
     return download_naptan(naptan_fp)
 
@@ -84,10 +145,11 @@ def read_naptan_stops(naptan_fp=None):
     Read NaPTAN stops as a DataFrame with GTFS column names.
 
     Uses ``naptan_fp``, else ``TRANSX2GTFS_NAPTAN_PATH``, else a copy downloaded
-    once into the temp directory.
+    into the user's cache directory (refreshed when older than a month).
     """
     naptan_fp = ensure_naptan_data(naptan_fp)
-    key = (naptan_fp, os.path.getmtime(naptan_fp))
+    stat = os.stat(naptan_fp)
+    key = (naptan_fp, stat.st_mtime_ns, stat.st_size)
     if key not in _naptan_cache:
         _naptan_cache.clear()
         _naptan_cache[key] = _read_naptan_csv(naptan_fp)
