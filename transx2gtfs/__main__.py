@@ -36,6 +36,12 @@ def build_parser():
         help="skip XML files larger than this many megabytes (default: 2000)",
     )
     parser.add_argument(
+        "--keep-superseded",
+        action="store_true",
+        help="convert every file, also versions superseded by a newer revision "
+        "of the same service (by default only the current version is converted)",
+    )
+    parser.add_argument(
         "--version", action="version", version=f"%(prog)s {__version__}"
     )
     return parser
@@ -49,6 +55,7 @@ def main(argv=None):
         append_to_existing=args.append,
         worker_cnt=args.workers,
         file_size_limit=args.file_size_limit,
+        skip_superseded=not args.keep_superseded,
     )
 
 

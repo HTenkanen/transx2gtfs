@@ -61,9 +61,12 @@ from transx2gtfs.calendar_dates import get_calendar_dates
 from transx2gtfs.dataio import (
     _table_exists,
     generate_gtfs_export,
+    read_xml_header,
     save_to_gtfs_zip,
     get_xml_paths,
 )
+from transx2gtfs.superseded import select_current_files
+from transx2gtfs.txc import TxcHeader
 from transx2gtfs.dataio import (
     read_xml_inside_nested_zip,
     read_xml_inside_zip,
@@ -87,6 +90,49 @@ def _row_count(gtfs_db, table):
         return conn.execute("SELECT COUNT(*) FROM %s" % table).fetchone()[0]
     finally:
         conn.close()
+
+
+def _item_name(item):
+    """The XML file name of an input item of any kind"""
+    while isinstance(item, dict):
+        key, item = next(iter(item.items()))
+        if isinstance(item, str) and not item.lower().endswith(".zip"):
+            return item
+        if isinstance(item, str):
+            return key
+    return os.path.basename(item)
+
+
+def select_files(files):
+    """
+    The input files to convert once superseded versions are left out: every
+    file's header is read and, per service, only the current version is kept
+    (see :mod:`transx2gtfs.superseded`). Dropped files are printed. A file whose
+    header cannot be read is kept; the conversion reports it.
+    """
+    headers = []
+    for item in files:
+        try:
+            header = read_xml_header(item)
+        except Exception as error:  # noqa: BLE001 - any parse error: keep the file
+            print("Could not read the header of %s: %s" % (_item_name(item), error))
+            header = TxcHeader(file_name=_item_name(item))
+        headers.append((item, header))
+    selection = select_current_files(headers)
+    for dropped in selection.dropped:
+        print(
+            "Skipping %s (ServiceCode %s, revision %s): superseded by %s (revision %s)"
+            % (
+                dropped.file_name,
+                dropped.service_code,
+                dropped.revision_number,
+                dropped.superseded_by,
+                dropped.superseded_by_revision,
+            )
+        )
+    if selection.dropped:
+        print("Skipped %d superseded file(s)." % len(selection.dropped))
+    return selection.kept
 
 
 def _init_worker(lock, bank_holidays_path=None):
@@ -217,6 +263,7 @@ def convert(
     append_to_existing=False,
     worker_cnt=None,
     file_size_limit=2000,
+    skip_superseded=True,
 ):
     """
     Converts TransXchange formatted schedule data into GTFS feed.
@@ -237,6 +284,12 @@ def convert(
     file_size_limit : int
         File size limit (in megabytes) can be used to skip larger-than-memory
         XML-files (should not happen).
+    skip_superseded : bool (default is True)
+        Leave out files superseded by a newer version of the same service
+        (change archives such as the Bus Open Data Service bulk download hold
+        several revisions): per ServiceCode, among versions whose operating
+        periods overlap only the highest RevisionNumber is converted. Dropped
+        files are printed.
     """
     # Total start
     tot_start_t = timeit()
@@ -256,6 +309,8 @@ def convert(
         raise ValueError(
             "Did not find any TransXChange .xml files from '%s'." % input_filepath
         )
+    if skip_superseded:
+        files = select_files(files)
 
     # Make sure the NaPTAN stop data and one immutable bank holiday snapshot are
     # available before the workers start; the snapshot only lives while they run

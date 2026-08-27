@@ -21,6 +21,9 @@ help solving them by [raising an issue](https://github.com/HTenkanen/transx2gtfs
  reference, frequency-based journeys written to `frequencies.txt`, wait times and journey
  timing-link overrides, interpolated times at non-timing stops, several lines per service).
  - Combines multiple TransXchange files into a single GTFS feed if present in the same folder.
+ - Leaves out files superseded by a newer revision of the same service (change archives such as the
+ Bus Open Data Service bulk download hold several versions): per ServiceCode, among versions whose
+ operating periods overlap only the highest `RevisionNumber` is converted (`skip_superseded`).
  - Finds and reads all XML files present in ZipFiles, nested ZipFiles and unpacked directories. 
  - Uses multiprocessing to parallelize the conversion process.
  - Parses bank holidays (from [gov.uk](https://www.gov.uk/bank-holidays)) affecting transit operations at the given time span of the TransXChange feed, which are written to calendar_dates.txt: every TransXChange holiday name and group (`AllBankHolidays`, `Christmas`, `HolidayMondays`, displacement holidays, …), Scottish holidays for files whose stops are in Scotland, `SpecialDaysOperation` date ranges and `ServicedOrganisations` (term-time) calendars.
@@ -92,6 +95,11 @@ worker_cnt : int
 
 file_size_limit : int
     File size limit (in megabytes) can be used to skip larger-than-memory XML-files (should not happen).
+
+skip_superseded : bool (default is True)
+    Leave out files superseded by a newer version of the same service: per ServiceCode, among
+    versions whose operating periods overlap only the highest RevisionNumber is converted.
+    Dropped files are printed.
 ```
 
 The conversion runs in worker processes. On macOS and Windows those are started with
@@ -115,7 +123,8 @@ $ transx2gtfs --help
 ```
 
 Options: `--append` (append to the intermediate database of a previous run), `--workers N`,
-`--file-size-limit MB` and `--version`.
+`--file-size-limit MB`, `--keep-superseded` (convert every file, also versions superseded by a
+newer revision of the same service) and `--version`.
 
 ### Stop and bank holiday data
 
