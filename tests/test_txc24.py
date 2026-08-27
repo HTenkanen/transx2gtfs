@@ -2014,3 +2014,68 @@ def test_intermediate_database_is_named_after_the_output(tmp_path):
         )
     assert departures(str(tmp_path / "a.zip")) == ["08:00:00", "09:00:00"]
     assert departures(str(tmp_path / "b.zip")) == ["09:00:00"]
+
+
+# Broken files ---------------------------------------------------------------------
+
+
+def test_files_that_cannot_be_read_are_skipped_with_a_warning(tmp_path):
+    from transx2gtfs.converter import intermediate_db_path, process_files
+    from transx2gtfs.distribute import Parallel
+
+    folder = tmp_path / "in"
+    folder.mkdir()
+    (folder / "good.xml").write_bytes(document())
+    (folder / "malformed.xml").write_bytes(b"<TransXChange><Services>")
+    # a document the model rejects: a journey referring to an unknown service
+    (folder / "invalid.xml").write_bytes(
+        document().replace(
+            b"<ServiceRef>S1</ServiceRef>", b"<ServiceRef>S9</ServiceRef>"
+        )
+    )
+    db = intermediate_db_path(str(tmp_path / "gtfs.zip"))
+    worker = Parallel(
+        input_files=[
+            str(folder / name) for name in ("good.xml", "malformed.xml", "invalid.xml")
+        ],
+        file_size_limit=2000,
+        gtfs_db=db,
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        process_files(worker)
+    messages = [str(w.message) for w in caught if "skipped" in str(w.message)]
+    assert len(messages) == 2
+    assert messages[0].startswith("malformed.xml: skipped, XMLSyntaxError: ")
+    assert messages[1].startswith("invalid.xml: skipped, ValueError: ")
+    assert "unknown Service 'S9'" in messages[1]
+    # the good file was written
+    import sqlite3
+
+    conn = sqlite3.connect(db)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM trips").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_convert_skips_broken_files_and_fails_only_when_nothing_converts(tmp_path):
+    folder = tmp_path / "in"
+    folder.mkdir()
+    (folder / "good.xml").write_bytes(document())
+    (folder / "malformed.xml").write_bytes(b"<TransXChange><Services>")
+    (folder / "invalid.xml").write_bytes(
+        document(journeys=[journey("VJ_1", departure="09:00:00")]).replace(
+            b"<ServiceRef>S1</ServiceRef>", b"<ServiceRef>S9</ServiceRef>"
+        )
+    )
+    output = str(tmp_path / "gtfs.zip")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        transx2gtfs.convert(str(folder), output, worker_cnt=1)
+    assert departures(output) == ["08:00:00"]  # only the good file
+    (folder / "good.xml").unlink()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with pytest.raises(ValueError, match="did not produce any trips"):
+            transx2gtfs.convert(str(folder), output, worker_cnt=1)

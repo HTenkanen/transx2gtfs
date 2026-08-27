@@ -46,6 +46,9 @@ import contextlib
 import sqlite3
 import os
 import multiprocessing
+import warnings
+
+from lxml import etree
 from transx2gtfs.stop_times import (
     drop_unresolved_stops,
     get_frequencies,
@@ -163,102 +166,118 @@ def process_files(parallel):
     gtfs_db = parallel.gtfs_db
 
     for idx, path in enumerate(files):
+        try:
+            tables = _process_file(idx, path, files, file_size_limit)
+        except (etree.XMLSyntaxError, ValueError, KeyError) as error:
+            # A file that cannot be read or converted must not stop the others
+            warnings.warn(
+                "%s: skipped, %s: %s" % (_item_name(path), type(error).__name__, error),
+                UserWarning,
+                stacklevel=2,
+            )
+            continue
+        # Writing is outside the guard: a failure here is not an input problem
+        if tables is not None:
+            _write_to_db(gtfs_db, **tables)
 
-        # If type is string, it is a direct filepath to XML
-        if isinstance(path, str):
-            data, file_size, xml_name = read_unpacked_xml(path)
 
-        # If the type is dictionary contents are in a zip
-        elif isinstance(path, dict):
+def _process_file(idx, path, files, file_size_limit):
+    """Read and convert one input file; the GTFS tables to write, or None"""
 
-            # If the type of value is a string the file can be read directly
-            # from the given Zipfile path, with following structure:
-            # {"transxchange_name.xml" : "/home/data/myzipfile.zip"}
-            if isinstance(list(path.values())[0], str):
-                data, file_size, xml_name = read_xml_inside_zip(path)
+    # If type is string, it is a direct filepath to XML
+    if isinstance(path, str):
+        data, file_size, xml_name = read_unpacked_xml(path)
 
-            # If the type of value is a dictionary the xml-file
-            # is in a ZipFile which is inside another ZipFile.
-            # In such cases, the path stucture is:
-            # {"outermost_zipfile_path.zip": {"inner_zipfile.zip": "transxchange.xml"}}
-            elif isinstance(list(path.values())[0], dict):
-                data, file_size, xml_name = read_xml_inside_nested_zip(path)
-            else:
-                raise ValueError("Something is wrong with the input xml-file paths.")
+    # If the type is dictionary contents are in a zip
+    elif isinstance(path, dict):
+
+        # If the type of value is a string the file can be read directly
+        # from the given Zipfile path, with following structure:
+        # {"transxchange_name.xml" : "/home/data/myzipfile.zip"}
+        if isinstance(list(path.values())[0], str):
+            data, file_size, xml_name = read_xml_inside_zip(path)
+
+        # If the type of value is a dictionary the xml-file
+        # is in a ZipFile which is inside another ZipFile.
+        # In such cases, the path stucture is:
+        # {"outermost_zipfile_path.zip": {"inner_zipfile.zip": "transxchange.xml"}}
+        elif isinstance(list(path.values())[0], dict):
+            data, file_size, xml_name = read_xml_inside_nested_zip(path)
         else:
             raise ValueError("Something is wrong with the input xml-file paths.")
+    else:
+        raise ValueError("Something is wrong with the input xml-file paths.")
 
-        # Filesize
-        size = round((file_size / 1000000), 1)
-        if file_size_limit < size:
-            continue
+    # Filesize
+    size = round((file_size / 1000000), 1)
+    if file_size_limit < size:
+        return
 
-        print("=================================================================")
-        print(
-            "[%s / %s] Processing TransXChange file: %s" % (idx, len(files), xml_name)
+    print("=================================================================")
+    print("[%s / %s] Processing TransXChange file: %s" % (idx, len(files), xml_name))
+    print("Size: %s MB" % size)
+    # Log start time
+    start_t = timeit()
+
+    # Parse stops
+    stop_data = get_stops(data)
+
+    if stop_data is None:
+        print("Did not found any valid stops. Skipping..")
+        return
+
+    # Parse agency
+    agency = get_agency(data)
+
+    # Parse GTFS info containing data about trips, calendar, stop_times and calendar_dates
+    gtfs_info = get_gtfs_info(data)
+
+    # Stops without coordinates cannot be exported: their rows are left out
+    gtfs_info = drop_unresolved_stops(gtfs_info, stop_data["stop_id"], xml_name)
+
+    # Parse stop_times
+    stop_times = get_stop_times(gtfs_info)
+
+    # Parse trips
+    trips = get_trips(gtfs_info)
+
+    # Parse calendar
+    calendar = get_calendar(gtfs_info)
+
+    # Parse calendar_dates
+    calendar_dates = get_calendar_dates(gtfs_info)
+
+    # Parse routes
+    routes = get_routes(gtfs_info=gtfs_info, doc=data)
+
+    # Parse frequencies (headway-based journeys)
+    frequencies = get_frequencies(gtfs_info)
+
+    # Only export data into db if there exists valid stop_times data
+    tables = None
+    if len(stop_times) > 0:
+        tables = dict(
+            stop_times=stop_times,
+            stops=stop_data,
+            routes=routes,
+            agency=agency,
+            trips=trips,
+            calendar=calendar,
+            calendar_dates=calendar_dates,
+            frequencies=frequencies,
         )
-        print("Size: %s MB" % size)
-        # Log start time
-        start_t = timeit()
+    else:
+        print(
+            "UserWarning: File %s did not contain valid stop_sequence data, skipping."
+            % (xml_name)
+        )
 
-        # Parse stops
-        stop_data = get_stops(data)
+    # Log end time and parse duration
+    end_t = timeit()
+    duration = (end_t - start_t) / 60
 
-        if stop_data is None:
-            print("Did not found any valid stops. Skipping..")
-            continue
-
-        # Parse agency
-        agency = get_agency(data)
-
-        # Parse GTFS info containing data about trips, calendar, stop_times and calendar_dates
-        gtfs_info = get_gtfs_info(data)
-
-        # Stops without coordinates cannot be exported: their rows are left out
-        gtfs_info = drop_unresolved_stops(gtfs_info, stop_data["stop_id"], xml_name)
-
-        # Parse stop_times
-        stop_times = get_stop_times(gtfs_info)
-
-        # Parse trips
-        trips = get_trips(gtfs_info)
-
-        # Parse calendar
-        calendar = get_calendar(gtfs_info)
-
-        # Parse calendar_dates
-        calendar_dates = get_calendar_dates(gtfs_info)
-
-        # Parse routes
-        routes = get_routes(gtfs_info=gtfs_info, doc=data)
-
-        # Parse frequencies (headway-based journeys)
-        frequencies = get_frequencies(gtfs_info)
-
-        # Only export data into db if there exists valid stop_times data
-        if len(stop_times) > 0:
-            _write_to_db(
-                gtfs_db,
-                stop_times=stop_times,
-                stops=stop_data,
-                routes=routes,
-                agency=agency,
-                trips=trips,
-                calendar=calendar,
-                calendar_dates=calendar_dates,
-                frequencies=frequencies,
-            )
-        else:
-            print(
-                "UserWarning: File %s did not contain valid stop_sequence data, skipping."
-                % (xml_name)
-            )
-
-        # Log end time and parse duration
-        end_t = timeit()
-        duration = (end_t - start_t) / 60
-
-        print("It took %s minutes." % round(duration, 1))
+    print("It took %s minutes." % round(duration, 1))
+    return tables
 
 
 def _write_to_db(gtfs_db, **tables):
