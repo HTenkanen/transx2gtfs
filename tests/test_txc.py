@@ -12,7 +12,15 @@ from transx2gtfs.agency import get_agency
 from transx2gtfs.stop_times import get_stop_times
 from transx2gtfs.transxchange import get_gtfs_info
 from transx2gtfs.trips import get_trips
-from transx2gtfs.txc import OperatingProfile, TxcDocument, read_txc
+from transx2gtfs.txc import (
+    OperatingProfile,
+    TxcDocument,
+    TxcHeader,
+    read_txc,
+    read_txc_header,
+)
+
+from conftest import UNPACKED_DIR, txc24_fixture
 
 MINIMAL = """<?xml version="1.0" encoding="utf-8"?>
 <TransXChange xmlns="http://www.transxchange.org.uk/" SchemaVersion="2.1">
@@ -555,3 +563,93 @@ def test_departure_time_is_optional_only_with_a_journey_reference():
     ref = b"<VehicleJourneyRef>VJ_AB</VehicleJourneyRef>"
     doc = read_txc(without.replace(VJ_A_TAIL, VJ_A_TAIL + ref))
     assert doc.vehicle_journey("VJ_A").departure_time is None
+
+
+# Headers --------------------------------------------------------------------------
+
+
+def test_revision_number_is_read(ferry_file):
+    assert read_txc(ferry_file).revision_number == "3"
+    assert read_txc(minimal()).revision_number is None
+    xml = minimal().replace(
+        b'SchemaVersion="2.1"', b'SchemaVersion="2.1" RevisionNumber="7"'
+    )
+    assert read_txc(xml).revision_number == "7"
+
+
+def test_header_reads_root_attributes_and_services(ferry_file):
+    header = read_txc_header(ferry_file)
+    assert isinstance(header, TxcHeader)
+    assert header.file_name == "tfl_33-RB5-_-y05-7.xml"
+    assert (header.schema_version, header.revision_number) == ("2.1", "3")
+    (service,) = header.services
+    assert service.code == "33-RB5-_-y05-7"
+    assert (service.start_date, service.end_date) == ("2019-02-23", "2019-12-22")
+    assert service.line_names == ["RB5"]
+
+    expected = {
+        "SVRABAO001.xml": ("0", "ABAO001", "2020-04-19"),
+        "FWC001_FWAY_150_PF000080424_20260901_20260714_210137.xml": (
+            "3",
+            "PF0000804:24",
+            "2026-09-01",
+        ),
+        "HRCS2_HRCS_240_PK20556564_20260831_20260730_114905.xml": (
+            "1",
+            "PK2055656:4",
+            "2026-08-31",
+        ),
+        "LGEN_403_LGENPK000181698403_20251025_-_2197827.xml": (
+            "16",
+            "PK0001816:98",
+            "2025-10-25",
+        ),
+    }
+    for name, (revision, code, start) in expected.items():
+        header = read_txc_header(txc24_fixture(name), file_name=name)
+        assert header.file_name == name
+        assert header.revision_number == revision, name
+        assert header.modification_date_time is not None
+        (service,) = header.services
+        assert (service.code, service.start_date) == (code, start), name
+        assert service.line_names, name
+    # a service without EndDate keeps None; the reader does not apply defaults
+    header = read_txc_header(
+        txc24_fixture("HRCS2_HRCS_240_PK20556564_20260831_20260730_114905.xml")
+    )
+    assert header.services[0].end_date is None
+
+
+def test_header_stops_before_the_vehicle_journeys():
+    # a journey the full reader rejects does not stop the header
+    broken = minimal().replace(b"<ServiceRef>SVC</ServiceRef>", b"", 1)
+    with pytest.raises(ValueError, match="missing required element"):
+        read_txc(broken)
+    assert [s.code for s in read_txc_header(broken).services] == ["SVC"]
+    # nor does a document truncated after its Services
+    truncated = minimal().split(b"<VehicleJourneys>")[0] + b"<VehicleJourneys>"
+    header = read_txc_header(truncated)
+    assert [s.code for s in header.services] == ["SVC"]
+    assert header.services[0].line_names == ["1"]
+    from lxml import etree
+
+    with pytest.raises(etree.XMLSyntaxError):
+        read_txc(truncated)
+
+
+def test_header_from_path_bytes_and_file():
+    path = UNPACKED_DIR / "tfl_1-HAM-_-y05-2675925.xml"
+    raw = path.read_bytes()
+    from_path = read_txc_header(path)
+    from_bytes = read_txc_header(raw, file_name=path.name)
+    from_file = read_txc_header(io.BytesIO(raw), file_name=path.name)
+    assert from_path == from_bytes == from_file
+    assert from_path.revision_number == "3"
+    assert [s.code for s in from_path.services] == ["1-HAM-_-y05-2675925"]
+    assert from_path.services[0].line_names == ["Hammersmith & City"]
+    # the seventh fixture
+    header = read_txc_header(UNPACKED_DIR / "tfl_99-PIC-B-y05-4.xml")
+    assert (header.file_name, header.revision_number) == ("tfl_99-PIC-B-y05-4.xml", "3")
+    (service,) = header.services
+    assert (service.code, service.line_names) == ("99-PIC-B-y05-4", ["PL-2"])
+    assert (service.start_date, service.end_date) == ("2020-02-01", "2020-02-02")

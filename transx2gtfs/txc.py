@@ -179,6 +179,7 @@ class VehicleJourney:
 class TxcDocument:
     file_name: str = None
     schema_version: str = None
+    revision_number: str = None
     creation_date_time: str = None
     modification_date_time: str = None
     operators: list = field(default_factory=list)
@@ -588,6 +589,28 @@ def _release(elem):
             del grandparent[0]
 
 
+@dataclass(slots=True)
+class ServiceHeader:
+    """The identity of a Service: code, operating period and line names"""
+
+    code: str
+    start_date: str = None
+    end_date: str = None
+    line_names: list = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class TxcHeader:
+    """What identifies a document version: root attributes and its services"""
+
+    file_name: str = None
+    schema_version: str = None
+    revision_number: str = None
+    creation_date_time: str = None
+    modification_date_time: str = None
+    services: list = field(default_factory=list)
+
+
 def read_txc(source, file_name=None):
     """
     Read a TransXChange document into a :class:`TxcDocument`.
@@ -595,6 +618,35 @@ def read_txc(source, file_name=None):
     ``source`` is a file path, ``bytes`` or a binary file-like object. The XML
     declaration's encoding is honoured in every case.
     """
+    return _read(source, file_name, header_only=False)
+
+
+def read_txc_header(source, file_name=None):
+    """
+    Read only what identifies a document version into a :class:`TxcHeader`:
+    the root attributes and the Services (code, OperatingPeriod, LineNames).
+    Parsing stops at the end of Services, before the VehicleJourneys.
+    """
+    doc = _read(source, file_name, header_only=True)
+    return TxcHeader(
+        file_name=doc.file_name,
+        schema_version=doc.schema_version,
+        revision_number=doc.revision_number,
+        creation_date_time=doc.creation_date_time,
+        modification_date_time=doc.modification_date_time,
+        services=[
+            ServiceHeader(
+                code=service.code,
+                start_date=service.start_date,
+                end_date=service.end_date,
+                line_names=[line.name for line in service.lines],
+            )
+            for service in doc.services
+        ],
+    )
+
+
+def _read(source, file_name, header_only):
     if isinstance(source, bytes):
         source = io.BytesIO(source)
     elif isinstance(source, (str, os.PathLike)):
@@ -623,12 +675,16 @@ def read_txc(source, file_name=None):
             depth += 1
             if depth == 1:
                 doc.schema_version = elem.get("SchemaVersion")
+                doc.revision_number = elem.get("RevisionNumber")
                 doc.creation_date_time = elem.get("CreationDateTime")
                 doc.modification_date_time = elem.get("ModificationDateTime")
             elif depth == 3:
                 name = _local(elem.tag) if isinstance(elem.tag, str) else None
-                in_record = name in _RECORD_TAGS
-                in_route_section = name == "RouteSection"
+                if header_only:
+                    in_record = name == "Service"
+                else:
+                    in_record = name in _RECORD_TAGS
+                in_route_section = name == "RouteSection" and not header_only
                 route_section_id = elem.get("id") if in_route_section else None
             continue
         depth -= 1
@@ -638,6 +694,12 @@ def read_txc(source, file_name=None):
             _release(elem)
             in_record = False
             in_route_section = False
+        elif depth == 1:
+            # The header stops once the Services are read (before the journeys)
+            if header_only and isinstance(elem.tag, str):
+                if _local(elem.tag) == "Services":
+                    break
+            _release(elem)
         elif depth == 3 and in_route_section:
             if isinstance(elem.tag, str) and _local(elem.tag) == "RouteLink":
                 link_id = elem.get("id")
