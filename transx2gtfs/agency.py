@@ -1,8 +1,13 @@
 import pandas as pd
 
+# Where the registered services of every operator are published; used when an
+# operator has no URL of its own in the table (agency_url must be a URL)
+DEFAULT_AGENCY_URL = "https://data.bus-data.dft.gov.uk/"
+
 
 def get_agency_url(operator_code):
-    """Get url for operators"""
+    """URL of an operator: its own for the known ones, else the Bus Open Data
+    Service where its services are published"""
     operator_urls = {
         "OId_LUL": "https://tfl.gov.uk/maps/track/tube",
         "OId_DLR": "https://tfl.gov.uk/modes/dlr/",
@@ -14,7 +19,7 @@ def get_agency_url(operator_code):
         "OId_EAL": "https://www.emiratesairline.co.uk/",
         # 'OId_CRC': "https://www.crownrivercruise.co.uk/",
     }
-    return operator_urls.get(operator_code, "NA")
+    return operator_urls.get(operator_code, DEFAULT_AGENCY_URL)
 
 
 def get_agency_name(operator):

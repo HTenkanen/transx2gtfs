@@ -22,7 +22,7 @@ REQUIRED_FILES = [
 def test_agency_url_lookup():
     assert get_agency_url("OId_LUL") == "https://tfl.gov.uk/maps/track/tube"
     assert get_agency_url("OId_CV") == "https://www.thamesclippers.com/"
-    assert get_agency_url("OId_UNKNOWN") == "NA"
+    assert get_agency_url("OId_UNKNOWN") == "https://data.bus-data.dft.gov.uk/"
 
 
 def test_get_agency(ferry_file):

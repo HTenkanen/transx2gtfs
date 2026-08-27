@@ -1748,6 +1748,8 @@ def test_convert_txc24_fixtures(tmp_path):
     # three of the four files produce trips (the HRCS2 journeys never operate:
     # HolidaysOnly with every holiday removed), so three operators
     assert sorted(gtfs["agency.txt"]["agency_id"]) == ["7778078", "FAB", "tkt_oid"]
+    # every agency has a real URL (validators reject a bare 'NA')
+    assert all(gtfs["agency.txt"]["agency_url"].str.startswith("https://"))
     # route names are unique per agency: the 403 and ABAO001 files carry
     # duplicates, told apart by the route_id in the long name
     routes = gtfs["routes.txt"]
