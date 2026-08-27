@@ -15,7 +15,11 @@ from transx2gtfs.bank_holidays import detect_division
 from transx2gtfs.calendar import get_calendar, parse_active_days
 from transx2gtfs.calendar_dates import get_calendar_dates
 from transx2gtfs.routes import get_routes
-from transx2gtfs.stop_times import get_frequencies, get_stop_times
+from transx2gtfs.stop_times import (
+    drop_unresolved_stops,
+    get_frequencies,
+    get_stop_times,
+)
 from transx2gtfs.transxchange import (
     GTFS_INFO_COLUMNS,
     get_gtfs_info,
@@ -1725,10 +1729,12 @@ def test_convert_txc24_fixtures(tmp_path):
     } <= names
     stop_times = gtfs["stop_times.txt"]
     assert set(stop_times["trip_id"]) == set(gtfs["trips.txt"]["trip_id"])
-    # one London stop of the 403 is not in the current NaPTAN
-    assert set(stop_times["stop_id"]) - set(gtfs["stops.txt"]["stop_id"]) == {
-        "490006706C13"
-    }
+    # one London stop of the 403 is not in the current NaPTAN: its rows are left
+    # out, the trips keep their other stops, every row has a stops.txt row
+    assert set(stop_times["stop_id"]) <= set(gtfs["stops.txt"]["stop_id"])
+    assert "490006706C13" not in set(stop_times["stop_id"])
+    # no trip is lost to it: 6 (150) + 67 (403) + 94 (ABAO001)
+    assert len(gtfs["trips.txt"]) == 167
     assert set(gtfs["trips.txt"]["route_id"]) <= set(gtfs["routes.txt"]["route_id"])
     assert set(gtfs["routes.txt"]["agency_id"]) <= set(gtfs["agency.txt"]["agency_id"])
     assert set(gtfs["trips.txt"]["service_id"]) == set(
@@ -1901,3 +1907,74 @@ def test_cli_naptan_options(tmp_path):
         warnings.simplefilter("ignore")
         main([str(folder), output, "--workers", "1", "--naptan-path", str(own)])
     assert os.path.isfile(output)
+
+
+# Unresolved stops -----------------------------------------------------------------
+
+
+def test_rows_at_unresolved_stops_are_left_out():
+    info = pd.DataFrame(
+        {
+            "trip_id": ["T1", "T1", "T2", "T2", "T2", "T3", "T3"],
+            "stop_id": ["A", "B", "A", "X", "B", "A", "Y"],
+            "stop_sequence": [1, 2, 1, 2, 3, 1, 2],
+        }
+    )
+    with pytest.warns(
+        UserWarning,
+        match=r"f.xml: 2 stop_times row\(s\) at stops missing from NaPTAN \(X, Y\) "
+        r"left out of 2 trip\(s\); 1 trip\(s\) left with fewer than two stops "
+        r"dropped: T3",
+    ):
+        kept = drop_unresolved_stops(info, ["A", "B"], "f.xml")
+    # T2 keeps its other stops with the original sequence numbers; T3 is gone
+    assert kept[["trip_id", "stop_id", "stop_sequence"]].values.tolist() == [
+        ["T1", "A", 1],
+        ["T1", "B", 2],
+        ["T2", "A", 1],
+        ["T2", "B", 3],
+    ]
+    assert kept.index.to_list() == [0, 1, 2, 3]
+    # nothing to do: the frame comes back as it is, without a warning
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert drop_unresolved_stops(info, ["A", "B", "X", "Y"], "f.xml") is info
+        assert len(drop_unresolved_stops(info.iloc[:0], [], "f.xml")) == 0
+    # equivalent journeys sharing a trip id give duplicate rows, which collapse
+    # to one exported stop: such a trip counts as a single-stop trip
+    twins = pd.DataFrame(
+        {
+            "trip_id": ["T4", "T4", "T4", "T4"],
+            "stop_id": ["A", "X", "A", "X"],
+            "stop_sequence": [1, 2, 1, 2],
+        }
+    )
+    with pytest.warns(UserWarning, match=r"dropped: T4"):
+        assert len(drop_unresolved_stops(twins, ["A"], "f.xml")) == 0
+
+
+def test_a_document_whose_stops_are_all_unknown_converts_to_nothing(tmp_path):
+    from transx2gtfs.stops import get_stops
+
+    links = (("0000UNKNOWN1", "0000UNKNOWN2", "PT5M"),)
+    doc = read_txc(document(links=links), file_name="unknown.xml")
+    with pytest.warns(UserWarning, match="Did not find a NaPTAN stop"):
+        stops = get_stops(doc)
+    assert stops is None  # no stop resolved at all
+    info = get_gtfs_info(doc)
+    with pytest.warns(
+        UserWarning,
+        match=r"unknown.xml: 2 stop_times row\(s\) at stops missing from NaPTAN "
+        r"\(0000UNKNOWN1, 0000UNKNOWN2\) left out of 1 trip\(s\); 1 trip\(s\) left "
+        r"with fewer than two stops dropped: JPS_1_MondayToSunday_0800",
+    ):
+        assert len(drop_unresolved_stops(info, [], doc.file_name)) == 0
+    # the conversion skips such a file (no stops) and has nothing to export
+    (tmp_path / "in").mkdir()
+    (tmp_path / "in" / "unknown.xml").write_bytes(document(links=links))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with pytest.raises(ValueError, match="did not produce any trips"):
+            transx2gtfs.convert(
+                str(tmp_path / "in"), str(tmp_path / "gtfs.zip"), worker_cnt=1
+            )
