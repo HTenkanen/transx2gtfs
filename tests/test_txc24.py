@@ -10,7 +10,11 @@ from transx2gtfs.calendar import get_calendar, parse_active_days
 from transx2gtfs.calendar_dates import get_calendar_dates
 from transx2gtfs.routes import get_routes
 from transx2gtfs.stop_times import get_stop_times
-from transx2gtfs.transxchange import GTFS_INFO_COLUMNS, get_gtfs_info
+from transx2gtfs.transxchange import (
+    GTFS_INFO_COLUMNS,
+    get_gtfs_info,
+    parse_runtime_duration,
+)
 from transx2gtfs.trips import get_trips
 from transx2gtfs.txc import read_txc
 
@@ -218,6 +222,10 @@ def tables(xml):
         agency=get_agency(doc),
         doc=doc,
     )
+
+
+def arrivals(t):
+    return t["stop_times"][["arrival_time", "departure_time"]].values.tolist()
 
 
 def exception_dates(calendar_dates, kind):
@@ -964,3 +972,128 @@ def test_daterange_reaches_the_last_representable_date():
         date.max,
     ]
     assert list(daterange(date(2027, 1, 2), date(2027, 1, 1))) == []
+
+
+# Timing ---------------------------------------------------------------------------
+
+
+def test_wait_times_and_journey_timing_link_overrides():
+    links = (
+        ("9300WAS1", "9300MIL2", "PT5M", {"from_wait": "PT1M"}),
+        ("9300MIL2", "9300MIL1", "PT7M", {"to_wait": "PT2M", "from_wait": "PT1M"}),
+        ("9300MIL1", "490007705N", "PT3M"),
+    )
+    t = tables(document(links=links))
+    assert arrivals(t) == [
+        ["08:00:00", "08:00:00"],
+        ["08:05:00", "08:06:00"],  # From wait of link 2
+        ["08:13:00", "08:15:00"],  # To wait of link 2
+        ["08:18:00", "08:18:00"],
+    ]
+    override = (
+        "<VehicleJourneyTimingLink>"
+        "<JourneyPatternTimingLinkRef>JPL_2</JourneyPatternTimingLinkRef>"
+        "<RunTime>PT9M</RunTime><To><WaitTime>PT0M</WaitTime></To>"
+        "</VehicleJourneyTimingLink>"
+    )
+    t = tables(document(links=links, journeys=[journey("VJ_1", extra=override)]))
+    assert arrivals(t)[2] == ["08:15:00", "08:15:00"]
+    # the journey departs its first stop at DepartureTime: a From wait on the
+    # first link does not delay it
+    links = (("9300WAS1", "9300MIL2", "PT5M", {"from_wait": "PT2M"}),)
+    assert arrivals(tables(document(links=links))) == [
+        ["08:00:00", "08:00:00"],
+        ["08:05:00", "08:05:00"],
+    ]
+    # each stop carries the link leaving it, the last stop the link reaching it
+    links = (
+        ("9300WAS1", "9300MIL2", "PT5M"),
+        ("9300MIL2", "9300MIL1", "PT7M"),
+        ("9300MIL1", "490007705N", "PT3M"),
+    )
+    info = tables(document(links=links))["info"]
+    assert info["route_link_ref"].to_list() == ["RL_1", "RL_2", "RL_3", "RL_3"]
+    # rows are the From stops of the links (then the last To stop), even when
+    # adjacent links disagree about the stop between them
+    links = (("9300WAS1", "9300MIL2", "PT5M"), ("9300MIL1", "490007705N", "PT3M"))
+    info = tables(document(links=links))["info"]
+    assert info["stop_id"].to_list() == ["9300WAS1", "9300MIL1", "490007705N"]
+
+
+def test_same_minute_journeys_with_different_seconds_keep_separate_trips():
+    t = tables(
+        document(journeys=[journey("VJ_1"), journey("VJ_2", departure="08:00:30")])
+    )
+    assert t["trips"]["trip_id"].iloc[0] == "JPS_1_MondayToSunday_0800"
+    assert t["trips"]["trip_id"].iloc[1].startswith("JPS_1_MondayToSunday_0800_")
+    assert t["trips"]["trip_id"].is_unique
+    first = t["stop_times"].groupby("trip_id")["departure_time"].first()
+    assert sorted(first) == ["08:00:00", "08:00:30"]
+
+
+def test_trips_crossing_midnight_keep_counting_hours():
+    links = (("9300WAS1", "9300MIL2", "PT1H30M"),)
+    t = tables(document(links=links, journeys=[journey("VJ_1", departure="23:15:00")]))
+    assert arrivals(t) == [["23:15:00", "23:15:00"], ["24:45:00", "24:45:00"]]
+
+
+def test_departure_times_are_parsed_strictly():
+    from transx2gtfs.transxchange import parse_time
+
+    assert [parse_time(v) for v in ("08:00", "08:00:30", "24:00:00", "08:00:29.5")] == [
+        28800,
+        28830,
+        86400,
+        28830,
+    ]
+    for value in ("8", "8:00", "08:90:00", "08:00:60", "25:00:00", "08:00:00:x", ""):
+        with pytest.raises(ValueError, match="Not a time"):
+            parse_time(value)
+    with pytest.raises(ValueError, match="Not a time: '08:00:00:00'"):
+        tables(document(journeys=[journey("VJ_1", departure="08:00:00:00")]))
+
+
+def test_runtime_durations():
+    values = ("PT0S", "PT1H2M3S", "P1DT1H", None, "")
+    assert [parse_runtime_duration(v) for v in values] == [0, 3723, 90000, 0, 0]
+    with pytest.warns(UserWarning, match="Negative duration '-PT5M'"):
+        assert parse_runtime_duration("-PT5M") == 300
+
+
+def test_fractional_and_invalid_durations():
+    assert parse_runtime_duration("PT0.5H") == 1800
+    assert parse_runtime_duration("PT1.5M") == 90
+    assert parse_runtime_duration("PT2.4S") == 2
+    assert parse_runtime_duration("P0.5D") == 43200
+    # rounded once, exactly: 30 digits just below half a second stay 0
+    assert parse_runtime_duration("PT0.499999999999999999999999999999S") == 0
+    assert parse_runtime_duration("PT0.5S") == 1
+    assert parse_runtime_duration("PT2.5S") == 3
+    invalid = (
+        "10 minutes",
+        "PT",
+        "P",
+        "-P",
+        "-PT",
+        "P1DT",
+        "PT5",
+        "PT1.5H30M",  # a fraction only on the lowest-order component
+        "P0.5DT1H",
+    )
+    for value in invalid:
+        with pytest.raises(ValueError, match="Not an ISO-8601 duration"):
+            parse_runtime_duration(value)
+
+
+def test_same_time_journeys_with_overrides_keep_separate_trips():
+    override = (
+        "<VehicleJourneyTimingLink>"
+        "<JourneyPatternTimingLinkRef>JPL_2</JourneyPatternTimingLinkRef>"
+        "<RunTime>PT9M</RunTime></VehicleJourneyTimingLink>"
+    )
+    t = tables(document(journeys=[journey("VJ_1"), journey("VJ_2", extra=override)]))
+    assert len(t["trips"]) == 2 and t["trips"]["trip_id"].is_unique
+    assert t["trips"]["trip_id"].iloc[0] == "JPS_1_MondayToSunday_0800"
+    assert t["trips"]["trip_id"].iloc[1].startswith("JPS_1_MondayToSunday_0800_")
+    by_trip = t["stop_times"].groupby("trip_id")["arrival_time"].last()
+    assert sorted(by_trip) == ["08:12:00", "08:14:00"]

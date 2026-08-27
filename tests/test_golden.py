@@ -1,7 +1,9 @@
 """The GTFS tables produced for the TfL fixtures must not change.
 
-The golden CSVs were generated with the DOM-based implementation of 0.5.0 and
-guard the streaming reader and every later refactor."""
+The goldens were generated with the DOM-based implementation of 0.5.0 (and
+regenerated deliberately when bank-holiday operation days and wait times were
+implemented) and guard every later refactor. A large table is stored zipped:
+python tests/regenerate_goldens.py rewrites them all."""
 
 import pandas as pd
 import pytest
@@ -44,16 +46,24 @@ def gtfs_tables(doc):
     }
 
 
+def read_golden(fixture, table):
+    """A golden table: <table>.csv, or <table>.zip holding that CSV; None if absent"""
+    directory = DATA_DIR / "golden" / fixture
+    for candidate in (directory / (table + ".csv"), directory / (table + ".zip")):
+        if candidate.exists():
+            return pd.read_csv(candidate, dtype=str, keep_default_na=False)
+    return None
+
+
 @pytest.mark.parametrize("fixture", FIXTURES)
 def test_gtfs_tables_match_golden(fixture):
     tables = gtfs_tables(read_txc(UNPACKED_DIR / (fixture + ".xml")))
     for name in TABLES:
-        golden = DATA_DIR / "golden" / fixture / (name + ".csv")
-        if not golden.exists():
+        expected = read_golden(fixture, name)
+        if expected is None:
             # No golden file means the table was not produced (calendar_dates
             # when no bank holiday falls into the operating period)
             assert tables[name] is None, name
             continue
-        expected = pd.read_csv(golden, dtype=str, keep_default_na=False)
         produced = tables[name].astype(str).reset_index(drop=True)
         assert_frame_equal(produced, expected, obj=name)
