@@ -1,0 +1,6 @@
+trip_id,start_time,end_time,headway_secs,exact_times
+js_9_Sunday_1214_3d5ba796,12:14:00,14:34:00,1200,0
+js_10_Sunday_1514_bfe2bbb7,15:14:00,17:14:00,1200,0
+js_14_Sunday_2115_2b20ff40,21:15:00,23:55:00,1200,0
+js_24_Sunday_1344_aea1edfc,13:44:00,18:24:00,1200,0
+js_29_Sunday_2225_52cf10cf,22:25:00,23:45:00,1200,0

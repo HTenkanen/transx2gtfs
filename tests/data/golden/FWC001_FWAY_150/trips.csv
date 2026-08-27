@@ -1,0 +1,7 @@
+route_id,service_id,trip_id,trip_headsign,direction_id
+1,PF0000804:24_20260901_20270901_Monday|Tuesday|Wednesday|Thursday|Friday_a3c620de,PF0000804:24_1,Sandon,1
+2,PF0000804:24_20260901_20270901_Monday|Tuesday|Wednesday|Thursday_5b808787,PF0000804:24_2,Bicknacre,0
+2,PF0000804:24_20260904_20270716_Friday_b3e22537,PF0000804:24_3,Bicknacre,0
+3,PF0000804:24_20260901_20270901_Monday|Tuesday|Wednesday|Thursday|Friday_a3c620de,PF0000804:24_4,Sandon,1
+4,PF0000804:24_20260904_20270716_Friday_b3e22537,PF0000804:24_5,Bicknacre,0
+4,PF0000804:24_20260901_20270901_Monday|Tuesday|Wednesday|Thursday_5b808787,PF0000804:24_6,Bicknacre,0
