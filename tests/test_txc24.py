@@ -224,6 +224,14 @@ def tables(xml):
     )
 
 
+ROUTE_SECTIONS = (
+    '<RouteSection id="RS_1"><RouteLink id="RL_1">'
+    "<Distance>1000</Distance></RouteLink></RouteSection>"
+    '<RouteSection id="RS_2"><RouteLink id="RL_2">'
+    "<Distance>3000</Distance></RouteLink></RouteSection>"
+)
+
+
 def arrivals(t):
     return t["stop_times"][["arrival_time", "departure_time"]].values.tolist()
 
@@ -1097,3 +1105,70 @@ def test_same_time_journeys_with_overrides_keep_separate_trips():
     assert t["trips"]["trip_id"].iloc[1].startswith("JPS_1_MondayToSunday_0800_")
     by_trip = t["stop_times"].groupby("trip_id")["arrival_time"].last()
     assert sorted(by_trip) == ["08:12:00", "08:14:00"]
+
+
+# Interpolation --------------------------------------------------------------------
+
+
+def test_interpolation_equal_and_by_distance():
+    links = (("9300WAS1", "9300MIL2", "PT0S"), ("9300MIL2", "9300MIL1", "PT10M"))
+    t = tables(document(links=links))
+    assert [a for a, _ in arrivals(t)] == ["08:00:00", "08:05:00", "08:10:00"]
+    t = tables(document(links=links, route_sections=ROUTE_SECTIONS))
+    assert [a for a, _ in arrivals(t)] == ["08:00:00", "08:02:30", "08:10:00"]
+    # several zero links in a row share the run
+    links = (
+        ("9300WAS1", "9300MIL2", "PT0S"),
+        ("9300MIL2", "9300MIL1", "PT0S"),
+        ("9300MIL1", "490007705N", "PT9M"),
+    )
+    t = tables(document(links=links))
+    assert [a for a, _ in arrivals(t)] == [
+        "08:00:00",
+        "08:03:00",
+        "08:06:00",
+        "08:09:00",
+    ]
+
+
+def test_interpolation_keeps_times_monotonic_with_waits_and_trailing_zero_run():
+    links = (
+        ("9300WAS1", "9300MIL2", "PT0S", {"to_wait": "PT1M"}),
+        ("9300MIL2", "9300MIL1", "PT10M"),
+        ("9300MIL1", "490007705N", "PT0S"),
+    )
+    t = tables(document(links=links))
+    assert arrivals(t) == [
+        ["08:00:00", "08:00:00"],
+        ["08:05:00", "08:06:00"],  # the dwell at B is added to the 10-minute run
+        ["08:11:00", "08:11:00"],
+        ["08:11:00", "08:11:00"],  # trailing zero run keeps the anchor time
+    ]
+
+
+def test_non_finite_distances_fall_back_to_equal_spacing():
+    sections = (
+        '<RouteSection id="RS_1"><RouteLink id="RL_1"><Distance>1e400</Distance>'
+        "</RouteLink></RouteSection>"
+        '<RouteSection id="RS_2"><RouteLink id="RL_2"><Distance>3000</Distance>'
+        "</RouteLink></RouteSection>"
+    )
+    links = (("9300WAS1", "9300MIL2", "PT0S"), ("9300MIL2", "9300MIL1", "PT10M"))
+    t = tables(document(links=links, route_sections=sections))
+    assert [a for a, _ in arrivals(t)] == ["08:00:00", "08:05:00", "08:10:00"]
+    # very large finite distances (whose sum overflows) are weighed relatively
+    sections = (
+        '<RouteSection id="RS_1"><RouteLink id="RL_1"><Distance>1e308</Distance>'
+        "</RouteLink></RouteSection>"
+        '<RouteSection id="RS_2"><RouteLink id="RL_2"><Distance>1.5e308</Distance>'
+        "</RouteLink></RouteSection>"
+    )
+    t = tables(document(links=links, route_sections=sections))
+    assert [a for a, _ in arrivals(t)] == ["08:00:00", "08:04:00", "08:10:00"]
+    # a missing or zero distance on one link of the run likewise
+    sections = (
+        '<RouteSection id="RS_1"><RouteLink id="RL_1"><Distance>0</Distance>'
+        "</RouteLink></RouteSection>"
+    )
+    t = tables(document(links=links, route_sections=sections))
+    assert [a for a, _ in arrivals(t)] == ["08:00:00", "08:05:00", "08:10:00"]

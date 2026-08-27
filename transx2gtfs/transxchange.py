@@ -320,13 +320,14 @@ def _link_timings(journey, sections):
     return timings
 
 
-def _stop_offsets(timings):
+def _stop_offsets(doc, timings):
     """
     Arrival and departure offsets (seconds after the journey's departure) of
     every stop of the journey: the first stop, then the To stop of every link.
     A stop's departure is its arrival plus the To wait of the link reaching it
     and the From wait of the link leaving it; the first stop departs at the
     journey's DepartureTime, so a From wait on the first link does not delay it.
+    Stops reached by zero-run-time links get interpolated times.
     """
     n_links = len(timings)
     arrivals = [0] * (n_links + 1)
@@ -335,7 +336,62 @@ def _stop_offsets(timings):
         arrivals[k + 1] = departures[k] + run
         next_from_wait = timings[k + 1][2] if k + 1 < n_links else 0
         departures[k + 1] = arrivals[k + 1] + to_wait + next_from_wait
+
+    # Interpolate stops reached by zero-run-time links between their anchors,
+    # by route link distance when every link of the run has one, else equally:
+    # only movement time is distributed, waits at the interpolated stops are
+    # added back so that times stay monotonic
+    k = 0
+    while k < n_links:
+        if timings[k][1] != 0:
+            k += 1
+            continue
+        first_zero = k
+        while k < n_links and timings[k][1] == 0:
+            k += 1
+        # links first_zero..k-1 are zero; link k (if any) closes the run
+        if k >= n_links:
+            break
+        anchor_start, anchor_end = first_zero, k + 1
+        links = [timings[i][0] for i in range(anchor_start, anchor_end)]
+        weights = [_distance(doc, link.route_link_ref) for link in links]
+        if any(w is None or w <= 0 for w in weights):
+            weights = [1.0] * len(links)
+        # Exact relative weights (at most 1 each): no overflow, no rounding
+        # until the seconds are rounded
+        largest = max(weights)
+        weights = [Fraction(w) / Fraction(largest) for w in weights]
+        total_weight = sum(weights)
+        interior = range(anchor_start + 1, anchor_end)
+        waits = {stop: departures[stop] - arrivals[stop] for stop in interior}
+        movement = arrivals[anchor_end] - departures[anchor_start] - sum(waits.values())
+        cumulative_weight = Fraction(0)
+        cumulative_wait = 0
+        for offset, stop in enumerate(interior):
+            cumulative_weight += weights[offset]
+            arrivals[stop] = (
+                departures[anchor_start]
+                + cumulative_wait
+                + round(movement * cumulative_weight / total_weight)
+            )
+            departures[stop] = arrivals[stop] + waits[stop]
+            cumulative_wait += waits[stop]
+        k += 1
     return arrivals, departures
+
+
+def _distance(doc, route_link_ref):
+    """Route link Distance as a finite float, or None"""
+    if route_link_ref is None:
+        return None
+    text = doc.route_link_distances.get(route_link_ref)
+    if text is None:
+        return None
+    try:
+        value = float(text)
+    except ValueError:
+        return None
+    return value if math.isfinite(value) else None
 
 
 # Main table
@@ -504,7 +560,7 @@ def process_vehicle_journeys(doc, service_jp_info):
 
         # Walk the timing links of all sections of the journey pattern in order
         timings = _link_timings(journey, sections)
-        arrivals, departures = _stop_offsets(timings)
+        arrivals, departures = _stop_offsets(doc, timings)
         # A row is the From stop of the link leaving it (with that link), the
         # last row the To stop of the last link, as before
         stop_ids = [t[0].from_stop for t in timings] + [timings[-1][0].to_stop]
