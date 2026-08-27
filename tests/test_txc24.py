@@ -9,7 +9,7 @@ from transx2gtfs.bank_holidays import detect_division
 from transx2gtfs.calendar import get_calendar, parse_active_days
 from transx2gtfs.calendar_dates import get_calendar_dates
 from transx2gtfs.routes import get_routes
-from transx2gtfs.stop_times import get_stop_times
+from transx2gtfs.stop_times import get_frequencies, get_stop_times
 from transx2gtfs.transxchange import (
     GTFS_INFO_COLUMNS,
     get_gtfs_info,
@@ -219,6 +219,7 @@ def tables(xml):
         calendar=get_calendar(info),
         calendar_dates=get_calendar_dates(info),
         routes=get_routes(info, doc),
+        frequencies=get_frequencies(info),
         agency=get_agency(doc),
         doc=doc,
     )
@@ -828,7 +829,7 @@ def test_document_whose_journeys_never_operate_yields_an_empty_table():
         )
     assert len(info) == 0 and list(info.columns) == GTFS_INFO_COLUMNS
     assert len(get_stop_times(info)) == 0
-    assert get_calendar_dates(info) is None
+    assert get_calendar_dates(info) is None and get_frequencies(info) is None
 
 
 def test_journeys_whose_every_operating_day_is_removed_never_operate():
@@ -1344,3 +1345,76 @@ def test_journey_operator_other_than_the_service_operator_warns():
     with pytest.warns(UserWarning, match="names operator 'OId_OTHER'"):
         with pytest.warns(UserWarning, match="never operates"):
             tables(document(journeys=[never, journey("VJ_2")]))
+
+
+# Frequencies ----------------------------------------------------------------------
+
+FREQUENCY = (
+    "<Frequency><EndTime>10:00:00</EndTime><Interval>"
+    "<ScheduledFrequency>PT15M</ScheduledFrequency></Interval></Frequency>"
+)
+
+
+def test_frequency_journey_becomes_a_frequencies_row():
+    t = tables(
+        document(
+            journeys=[
+                journey("VJ_1", extra=FREQUENCY),
+                journey("VJ_2", departure="12:00:00"),
+            ]
+        )
+    )
+    (row,) = t["frequencies"].to_dict("records")
+    # a frequency journey never shares the plain id of a scheduled journey
+    assert row["trip_id"].startswith("JPS_1_MondayToSunday_0800_")
+    assert row["trip_id"] in set(t["trips"]["trip_id"])
+    assert {
+        k: row[k] for k in ("start_time", "end_time", "headway_secs", "exact_times")
+    } == {
+        "start_time": "08:00:00",
+        "end_time": "10:00:00",
+        "headway_secs": 900,
+        "exact_times": 0,
+    }
+    assert len(t["trips"]) == 2
+    # the template trip keeps its stop times
+    assert t["stop_times"]["trip_id"].str.startswith(row["trip_id"]).sum() == 3
+    assert tables(document())["frequencies"] is None
+
+
+def test_overnight_frequency_window_runs_into_the_next_day():
+    freq = (
+        "<Frequency><EndTime>01:00:00</EndTime><Interval>"
+        "<ScheduledFrequency>PT30M</ScheduledFrequency></Interval></Frequency>"
+    )
+    t = tables(document(journeys=[journey("VJ_1", departure="23:00:00", extra=freq)]))
+    assert t["frequencies"][["start_time", "end_time"]].values.tolist() == [
+        ["23:00:00", "25:00:00"]
+    ]
+
+
+def test_same_time_journeys_with_frequency_keep_separate_trips():
+    t = tables(document(journeys=[journey("VJ_1"), journey("VJ_3", extra=FREQUENCY)]))
+    assert len(t["trips"]) == 2 and t["trips"]["trip_id"].is_unique
+    assert t["trips"]["trip_id"].iloc[0] == "JPS_1_MondayToSunday_0800"
+    assert t["frequencies"]["trip_id"].iloc[0] != "JPS_1_MondayToSunday_0800"
+
+
+def test_frequency_without_a_positive_interval_raises():
+    for interval in ("", "PT0S", "-PT15M"):
+        freq = "<Frequency><EndTime>10:00:00</EndTime>%s</Frequency>" % (
+            "<Interval><ScheduledFrequency>%s</ScheduledFrequency></Interval>"
+            % interval
+            if interval
+            else ""
+        )
+        with pytest.raises(ValueError, match="'VJ_1' has no positive Frequency"):
+            tables(document(journeys=[journey("VJ_1", extra=freq)]))
+    # a Frequency without EndTime is not a frequency journey
+    freq = (
+        "<Frequency><Interval><ScheduledFrequency>PT15M</ScheduledFrequency>"
+        "</Interval></Frequency>"
+    )
+    assert (
+        tables(document(journeys=[journey("VJ_1", extra=freq)]))["frequencies"] is None
+    )

@@ -51,6 +51,25 @@ def get_stop_times(gtfs_info):
     return stop_times[stops_per_trip > 1].reset_index(drop=True)
 
 
+def get_frequencies(gtfs_info):
+    """frequencies.txt rows for frequency-based journeys, or None"""
+    if "frequency_end_time" not in gtfs_info.columns:
+        return None
+    trips = gtfs_info.dropna(subset=["frequency_end_time"]).drop_duplicates("trip_id")
+    if len(trips) == 0:
+        return None
+    frequencies = pd.DataFrame(
+        {
+            "trip_id": trips["trip_id"].to_list(),
+            "start_time": trips["frequency_start_time"].to_list(),
+            "end_time": trips["frequency_end_time"].to_list(),
+            "headway_secs": trips["frequency_headway_secs"].astype(int).to_list(),
+            "exact_times": 0,
+        }
+    )
+    return frequencies
+
+
 def make_service_id(service_ref, start_date, end_date, weekdays, exceptions):
     """
     service_id of a calendar: '<service>_<start>_<end>_<weekdays>', with a short

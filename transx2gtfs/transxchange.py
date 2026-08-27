@@ -43,6 +43,9 @@ GTFS_INFO_COLUMNS = [
     "end_date",
     "weekdays",
     "exceptions",
+    "frequency_start_time",
+    "frequency_end_time",
+    "frequency_headway_secs",
     "service_id",
 ]
 
@@ -348,8 +351,8 @@ def _journey_fingerprint(
     journey, departure_seconds, exceptions, period, service_period
 ):
     """What distinguishes same-minute journeys of one pattern: departure seconds,
-    exceptions, a calendar clipped away from the service's period and timing link
-    overrides; '' when none of them apply"""
+    exceptions, a calendar clipped away from the service's period, timing link
+    overrides and frequency data; '' when none of them apply"""
     parts = []
     if departure_seconds % 60:
         parts.append("seconds:%d" % (departure_seconds % 60))
@@ -368,6 +371,10 @@ def _journey_fingerprint(
                 tl.from_wait_time or "",
                 tl.to_wait_time or "",
             )
+        )
+    if journey.frequency is not None and journey.frequency.end_time:
+        parts.append(
+            "freq:%s:%s" % (journey.frequency.end_time, journey.frequency.interval)
         )
     return "|".join(parts)
 
@@ -645,6 +652,29 @@ def process_vehicle_journeys(doc, service_jp_info):
         else:
             trip_id = "%s_%s" % (service_ref, vehicle_journey_id)
 
+        # Frequency-based journey; an EndTime not after the departure is on the
+        # following day
+        if journey.frequency is not None and journey.frequency.end_time:
+            frequency_start = format_time(departure_seconds)
+            end_seconds = parse_time(journey.frequency.end_time)
+            if end_seconds <= departure_seconds:
+                end_seconds += 24 * 3600
+            frequency_end = format_time(end_seconds)
+            interval = journey.frequency.interval or ""
+            # The shared parser strips a negative sign; a headway must be positive
+            frequency_headway = (
+                0
+                if interval.strip().startswith("-")
+                else parse_runtime_duration(interval)
+            )
+            if frequency_headway <= 0:
+                raise ValueError(
+                    "VehicleJourney '%s' has no positive Frequency interval."
+                    % vehicle_journey_id
+                )
+        else:
+            frequency_start = frequency_end = frequency_headway = None
+
         # Attributes shared by all stop_times rows of this journey
         journey_info = dict(
             agency_id=agency_id,
@@ -662,6 +692,9 @@ def process_vehicle_journeys(doc, service_jp_info):
             end_date=end_date,
             weekdays=weekdays,
             exceptions=exceptions,
+            frequency_start_time=frequency_start,
+            frequency_end_time=frequency_end,
+            frequency_headway_secs=frequency_headway,
         )
 
         # Walk the timing links of all sections of the journey pattern in order

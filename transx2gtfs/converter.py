@@ -46,7 +46,7 @@ import contextlib
 import sqlite3
 import os
 import multiprocessing
-from transx2gtfs.stop_times import get_stop_times
+from transx2gtfs.stop_times import get_stop_times, get_frequencies
 from transx2gtfs.stops import get_stops, ensure_naptan_data
 from transx2gtfs.trips import get_trips
 from transx2gtfs.routes import get_routes
@@ -144,6 +144,9 @@ def process_files(parallel):
         # Parse routes
         routes = get_routes(gtfs_info=gtfs_info, doc=data)
 
+        # Parse frequencies (headway-based journeys)
+        frequencies = get_frequencies(gtfs_info)
+
         # Only export data into db if there exists valid stop_times data
         if len(stop_times) > 0:
             _write_to_db(
@@ -155,6 +158,7 @@ def process_files(parallel):
                 trips=trips,
                 calendar=calendar,
                 calendar_dates=calendar_dates,
+                frequencies=frequencies,
             )
         else:
             print(
