@@ -1748,6 +1748,17 @@ def test_convert_txc24_fixtures(tmp_path):
     # three of the four files produce trips (the HRCS2 journeys never operate:
     # HolidaysOnly with every holiday removed), so three operators
     assert sorted(gtfs["agency.txt"]["agency_id"]) == ["7778078", "FAB", "tkt_oid"]
+    # route names are unique per agency: the 403 and ABAO001 files carry
+    # duplicates, told apart by the route_id in the long name
+    routes = gtfs["routes.txt"]
+    names = routes[["agency_id", "route_short_name", "route_long_name"]]
+    assert not names.duplicated().any()
+    renamed = routes[routes["route_long_name"].str.endswith(")")]
+    assert len(renamed) == 28 + 3
+    assert all(
+        row["route_long_name"].endswith("(%s)" % row["route_id"])
+        for _, row in renamed.iterrows()
+    )
 
 
 # Superseded files -----------------------------------------------------------------
@@ -2384,3 +2395,77 @@ def test_cli_log_file_option(tmp_path):
             ]
         )
     assert "GTFS zipfile was saved to:" in (tmp_path / "cli.log").read_text()
+
+
+# Route names ----------------------------------------------------------------------
+
+
+def test_route_names_are_made_unique_per_agency(caplog):
+    from transx2gtfs.dataio import make_route_names_unique
+
+    routes = pd.DataFrame(
+        {
+            "route_id": ["R1", "R2", "R3", "R4", "R5"],
+            "agency_id": ["A", "A", "A", "B", "A"],
+            "route_short_name": ["1", "1", "1", "1", "2"],
+            "route_long_name": ["X - Y", "X - Y", "Y - X", "X - Y", "X - Y"],
+            "route_type": [3, 3, 3, 3, 3],
+        }
+    )
+    caplog.set_level(logging.INFO, logger="transx2gtfs")
+    unique = make_route_names_unique(routes)
+    # the first keeps its names; a different agency or short name is not a clash
+    assert unique["route_long_name"].to_list() == [
+        "X - Y",
+        "X - Y (R2)",
+        "Y - X",
+        "X - Y",
+        "X - Y",
+    ]
+    assert "1 route(s) shared their names" in caplog.text
+    assert (
+        not unique[["agency_id", "route_short_name", "route_long_name"]]
+        .duplicated()
+        .any()
+    )
+    # already unique: returned unchanged, without a log line
+    caplog.clear()
+    again = make_route_names_unique(unique)
+    assert again.equals(unique)
+    assert "shared their names" not in caplog.text
+    # a missing long name and an empty one are the same (empty) GTFS field
+    blank = pd.DataFrame(
+        {
+            "route_id": ["R1", "R2"],
+            "agency_id": ["A", "A"],
+            "route_short_name": ["1", "1"],
+            "route_long_name": [None, ""],
+            "route_type": [3, 3],
+        }
+    )
+    first, second = make_route_names_unique(blank)["route_long_name"].to_list()
+    assert pd.isna(first) and second == " (R2)"
+    assert len(make_route_names_unique(routes.iloc[:0])) == 0
+    # a route literally named like a renamed one: renamed again until unique
+    clash = pd.DataFrame(
+        {
+            "route_id": ["R1", "R2", "R3"],
+            "agency_id": ["A", "A", "A"],
+            "route_short_name": ["1", "1", "1"],
+            "route_long_name": ["X", "X", "X (R2)"],
+            "route_type": [3, 3, 3],
+        }
+    )
+    caplog.clear()
+    unique = make_route_names_unique(clash)
+    assert unique["route_long_name"].to_list() == ["X", "X (R2)", "X (R2) (R3)"]
+    assert (
+        not unique[["agency_id", "route_short_name", "route_long_name"]]
+        .duplicated()
+        .any()
+    )
+    # R3 was renamed in two passes but counts once
+    assert "2 route(s) shared their names" in caplog.text
+    # a table without the name columns (a minimal export) is left alone
+    minimal = pd.DataFrame({"route_id": ["R1", "R2"]})
+    assert make_route_names_unique(minimal) is minimal

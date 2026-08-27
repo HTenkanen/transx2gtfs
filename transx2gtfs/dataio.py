@@ -143,6 +143,41 @@ def _table_exists(conn, name):
     return conn.execute(query, (name,)).fetchone() is not None
 
 
+def make_route_names_unique(routes):
+    """
+    Routes of one agency sharing route_short_name and route_long_name (trip
+    planners warn about them) are told apart: the first keeps its names, the
+    later ones get ' (<route_id>)' appended to route_long_name — again, should
+    that still clash with a name in use (route ids are unique, so this ends).
+    """
+    names = ["agency_id", "route_short_name", "route_long_name"]
+    if len(routes) == 0 or any(column not in routes.columns for column in names):
+        return routes
+    routes = routes.reset_index(drop=True)
+    renamed = pd.Series(False, index=routes.index)
+    for _ in range(len(routes)):
+        # A missing name and an empty one are the same empty field in GTFS
+        duplicated = routes[names].fillna("").astype(str).duplicated(keep="first")
+        if not duplicated.any():
+            break
+        if not renamed.any():
+            routes = routes.copy()
+        routes.loc[duplicated, "route_long_name"] = (
+            routes.loc[duplicated, "route_long_name"].fillna("").astype(str)
+            + " ("
+            + routes.loc[duplicated, "route_id"].astype(str)
+            + ")"
+        )
+        renamed |= duplicated
+    if renamed.any():
+        log.info(
+            "%d route(s) shared their names with another route of the same agency; "
+            "the route_id was appended to their route_long_name.",
+            int(renamed.sum()),
+        )
+    return routes
+
+
 def generate_gtfs_export(gtfs_db_fp):
     """Reads the gtfs database and generates an export dictionary for GTFS"""
     # Initialize connection
@@ -175,6 +210,7 @@ def generate_gtfs_export(gtfs_db_fp):
         routes = routes.drop("index", axis=1)
     # Drop duplicates
     routes = routes.drop_duplicates(subset=["route_id"])
+    routes = make_route_names_unique(routes)
 
     # Trips
     # -----
