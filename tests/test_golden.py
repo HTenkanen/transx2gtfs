@@ -14,7 +14,11 @@ from transx2gtfs.agency import get_agency
 from transx2gtfs.calendar import get_calendar
 from transx2gtfs.calendar_dates import get_calendar_dates
 from transx2gtfs.routes import get_routes
-from transx2gtfs.stop_times import get_frequencies, get_stop_times
+from transx2gtfs.stop_times import (
+    drop_unresolved_stops,
+    get_frequencies,
+    get_stop_times,
+)
 from transx2gtfs.stops import get_stops
 from transx2gtfs.transxchange import get_gtfs_info
 from transx2gtfs.trips import get_trips
@@ -56,10 +60,14 @@ TABLES = [
 
 
 def gtfs_tables(doc):
-    gtfs_info = get_gtfs_info(doc)
+    """The tables as convert() builds them for one file"""
+    stops = get_stops(doc)
+    gtfs_info = drop_unresolved_stops(
+        get_gtfs_info(doc), stops["stop_id"], doc.file_name
+    )
     return {
         "agency": get_agency(doc),
-        "stops": get_stops(doc),
+        "stops": stops,
         "routes": get_routes(gtfs_info, doc),
         "trips": get_trips(gtfs_info),
         "stop_times": get_stop_times(gtfs_info),

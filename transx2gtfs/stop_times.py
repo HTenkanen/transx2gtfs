@@ -1,4 +1,5 @@
 import hashlib
+import warnings
 
 import pandas as pd
 
@@ -49,6 +50,49 @@ def get_stop_times(gtfs_info):
             % trip_id
         )
     return stop_times[stops_per_trip > 1].reset_index(drop=True)
+
+
+def drop_unresolved_stops(gtfs_info, stop_ids, file_name=None):
+    """
+    Leave out the stop_times rows at stops absent from ``stop_ids`` (the stops
+    resolved for the file), so that every row refers to a stops.txt row; the
+    trips keep their other stops (stop_sequence keeps its gaps). A trip left
+    with fewer than two distinct stops is left out entirely. Warns once per
+    file with the missing stop ids and the trips dropped for that reason.
+    """
+    if len(gtfs_info) == 0:
+        return gtfs_info
+    unresolved = ~gtfs_info["stop_id"].isin(set(stop_ids))
+    if not unresolved.any():
+        return gtfs_info
+    kept = gtfs_info.loc[~unresolved]
+    # Distinct stops per trip, as get_stop_times exports them (duplicate rows of
+    # equivalent journeys collapse there)
+    distinct = kept.drop_duplicates(["trip_id", "stop_sequence"])
+    enough = set(distinct.groupby("trip_id").size().loc[lambda n: n >= 2].index)
+    kept = kept.loc[kept["trip_id"].isin(enough)].reset_index(drop=True)
+    affected = set(gtfs_info.loc[unresolved, "trip_id"])
+    lost = sorted(affected - enough)
+    dropped = ""
+    if lost:
+        dropped = "; %d trip(s) left with fewer than two stops dropped: %s" % (
+            len(lost),
+            ", ".join(lost),
+        )
+    warnings.warn(
+        "%s: %d stop_times row(s) at stops missing from NaPTAN (%s) left out of "
+        "%d trip(s)%s."
+        % (
+            file_name or "TransXChange document",
+            int(unresolved.sum()),
+            ", ".join(sorted(set(gtfs_info.loc[unresolved, "stop_id"]))),
+            len(affected),
+            dropped,
+        ),
+        UserWarning,
+        stacklevel=2,
+    )
+    return kept
 
 
 def get_frequencies(gtfs_info):

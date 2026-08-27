@@ -46,7 +46,11 @@ import contextlib
 import sqlite3
 import os
 import multiprocessing
-from transx2gtfs.stop_times import get_stop_times, get_frequencies
+from transx2gtfs.stop_times import (
+    drop_unresolved_stops,
+    get_frequencies,
+    get_stop_times,
+)
 from transx2gtfs.stops import get_stops, ensure_naptan_data, set_naptan_path
 from transx2gtfs.bank_holidays import (
     remove_bank_holidays_snapshot,
@@ -201,6 +205,9 @@ def process_files(parallel):
 
         # Parse GTFS info containing data about trips, calendar, stop_times and calendar_dates
         gtfs_info = get_gtfs_info(data)
+
+        # Stops without coordinates cannot be exported: their rows are left out
+        gtfs_info = drop_unresolved_stops(gtfs_info, stop_data["stop_id"], xml_name)
 
         # Parse stop_times
         stop_times = get_stop_times(gtfs_info)
