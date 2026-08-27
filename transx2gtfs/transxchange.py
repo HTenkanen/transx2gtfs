@@ -16,7 +16,7 @@ from transx2gtfs.bank_holidays import (
 )
 from transx2gtfs.calendar import get_weekday_info, parse_active_days
 from transx2gtfs.calendar_dates import encode_exceptions
-from transx2gtfs.routes import get_mode
+from transx2gtfs.routes import get_mode, synthetic_route_ids
 from transx2gtfs.stop_times import exceptions_digest, generate_service_id, get_direction
 
 DEFAULT_WEEKDAYS = "MondayToSunday"
@@ -348,11 +348,11 @@ def journey_calendar(doc, calendars, profile, start, end):
 
 
 def _journey_fingerprint(
-    journey, departure_seconds, exceptions, period, service_period
+    journey, departure_seconds, exceptions, period, service_period, synthetic_route
 ):
     """What distinguishes same-minute journeys of one pattern: departure seconds,
-    exceptions, a calendar clipped away from the service's period, timing link
-    overrides and frequency data; '' when none of them apply"""
+    exceptions, a calendar clipped away from the service's period, a line-derived
+    route, timing link overrides and frequency data; '' when none of them apply"""
     parts = []
     if departure_seconds % 60:
         parts.append("seconds:%d" % (departure_seconds % 60))
@@ -360,6 +360,8 @@ def _journey_fingerprint(
         parts.append(exceptions)
     if period != service_period:
         parts.append("period:%s:%s" % period)
+    if synthetic_route:
+        parts.append("route:%s" % synthetic_route)
     for tl in sorted(
         journey.timing_links, key=lambda t: t.journey_pattern_timing_link_ref
     ):
@@ -499,6 +501,7 @@ def process_vehicle_journeys(doc, service_jp_info):
     services = {service.code: service for service in doc.services}
     service_profiles = _service_profiles(doc)
     calendars = _Calendars(doc)
+    synthetic_ids = synthetic_route_ids(doc)
     journey_index = {j.code: j for j in vjourneys}
     resolved = {}
 
@@ -588,6 +591,22 @@ def process_vehicle_journeys(doc, service_jp_info):
         direction_id = int(direction_id)
         travel_mode = int(travel_mode)
 
+        # The journey's line (several lines per service are possible)
+        line = next((ln for ln in service.lines if ln.id == journey.line_ref), None)
+        if journey.line_ref is not None and line is None:
+            raise ValueError(
+                "VehicleJourney '%s' refers to unknown Line '%s'."
+                % (vehicle_journey_id, journey.line_ref)
+            )
+        if line is not None:
+            line_name = line.name
+        # A pattern without a (matching) Route: one route per service and line
+        synthetic_route = None
+        if route_id is None:
+            line_id = line.id if line is not None else service.lines[0].id
+            route_id = synthetic_ids[(service.code, line_id)]
+            synthetic_route = route_id
+
         if journey.operator_ref not in (
             None,
             "",
@@ -646,6 +665,7 @@ def process_vehicle_journeys(doc, service_jp_info):
                 exceptions,
                 (start_date, end_date),
                 service_period,
+                synthetic_route,
             )
             if fingerprint:
                 trip_id = "%s_%s" % (trip_id, exceptions_digest(fingerprint))
@@ -838,6 +858,39 @@ def _require(value, what):
     return value
 
 
+def _route_for_pattern(doc, jp):
+    """
+    RouteRef of the pattern, else the Route whose section list equals the
+    sequence of route sections of the pattern's links (or, failing that, the
+    only route whose list starts with that sequence); None when no route matches.
+    """
+    if jp.route_ref:
+        return jp.route_ref
+    sequence = []
+    for section_id in jp.section_refs:
+        for link in doc.journey_pattern_section(section_id).timing_links:
+            route_section = doc.route_link_sections.get(link.route_link_ref)
+            if route_section is None:
+                # A link without a route link: the path is unknown, no matching
+                return None
+            if not sequence or sequence[-1] != route_section:
+                sequence.append(route_section)
+    if not sequence:
+        return None
+    for route in doc.routes:
+        if route.route_section_refs == sequence:
+            return route.id
+    # A route the pattern covers a prefix of; ambiguity means unmatched
+    prefixed = [
+        route
+        for route in doc.routes
+        if route.route_section_refs[: len(sequence)] == sequence
+    ]
+    if len(prefixed) == 1:
+        return prefixed[0].id
+    return None
+
+
 def get_service_journey_pattern_info(doc):
     """Retrieve a DataFrame of all Journey Pattern info of services"""
     rows = []
@@ -889,8 +942,8 @@ def get_service_journey_pattern_info(doc):
                 headsign = _require(service.origin, what + " Origin")
             else:
                 headsign = _require(service.destination, what + " Destination")
-            # Route Reference
-            route_ref = _require(jp.route_ref, jp_what + " RouteRef")
+            # Route (None: synthesised per line when the journeys are processed)
+            route_ref = _route_for_pattern(doc, jp)
 
             vehicle_type = jp.vehicle_type_code
             vehicle_description = jp.vehicle_type_description

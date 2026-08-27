@@ -1418,3 +1418,187 @@ def test_frequency_without_a_positive_interval_raises():
     assert (
         tables(document(journeys=[journey("VJ_1", extra=freq)]))["frequencies"] is None
     )
+
+
+# Lines and routes ------------------------------------------------------------------
+
+
+def test_line_ref_selects_the_line_name():
+    lines = (
+        '<Line id="L1"><LineName>1</LineName></Line><Line id="L2">'
+        "<LineName>1A</LineName></Line>"
+    )
+    t = tables(
+        document(
+            lines=lines,
+            journeys=[
+                journey("VJ_1"),
+                journey("VJ_2", departure="09:00:00", line="L2"),
+            ],
+        )
+    )
+    names = (
+        t["info"]
+        .drop_duplicates("vehicle_journey_id")
+        .set_index("vehicle_journey_id")["line_name"]
+    )
+    assert names.to_dict() == {"VJ_1": "1", "VJ_2": "1A"}
+    assert t["routes"]["route_id"].to_list() == ["R_1"]
+    with pytest.raises(ValueError, match="VJ_1' refers to unknown Line 'L9'"):
+        tables(document(journeys=[journey("VJ_1", line="L9")]))
+
+
+def pattern_without_route():
+    return (
+        '<JourneyPattern id="JP_1"><Direction>outbound</Direction>'
+        "<JourneyPatternSectionRefs>JPS_1</JourneyPatternSectionRefs></JourneyPattern>"
+    )
+
+
+def test_route_matched_by_section_sequence():
+    routes = (
+        '<Route id="R_short"><PrivateCode>R_short</PrivateCode>'
+        "<Description>Short</Description>"
+        "<RouteSectionRef>RS_1</RouteSectionRef></Route>"
+        '<Route id="R_full"><PrivateCode>R_full</PrivateCode>'
+        "<Description>Full</Description>"
+        "<RouteSectionRef>RS_1</RouteSectionRef>"
+        "<RouteSectionRef>RS_2</RouteSectionRef></Route>"
+    )
+    t = tables(
+        document(
+            routes=routes,
+            route_sections=ROUTE_SECTIONS,
+            journey_patterns=pattern_without_route(),
+        )
+    )
+    assert t["trips"]["route_id"].to_list() == [
+        "R_full"
+    ]  # exact sequence wins over prefix
+    assert t["routes"]["route_id"].to_list() == ["R_full"]
+
+
+def test_route_matched_by_unique_prefix_when_no_exact_match():
+    routes = (
+        '<Route id="R_long"><PrivateCode>R_long</PrivateCode><Description>L</Description>'
+        "<RouteSectionRef>RS_1</RouteSectionRef><RouteSectionRef>RS_2</RouteSectionRef>"
+        "<RouteSectionRef>RS_9</RouteSectionRef></Route>"
+        '<Route id="R_other"><PrivateCode>R_other</PrivateCode><Description>O</Description>'
+        "<RouteSectionRef>RS_1</RouteSectionRef><RouteSectionRef>RS_8</RouteSectionRef></Route>"
+    )
+    t = tables(
+        document(
+            routes=routes,
+            route_sections=ROUTE_SECTIONS,
+            journey_patterns=pattern_without_route(),
+        )
+    )
+    assert t["trips"]["route_id"].to_list() == [
+        "R_long"
+    ]  # only R_long starts with RS_1, RS_2
+
+
+def test_routes_sharing_the_pattern_prefix_but_diverging_are_unmatched():
+    # both routes start with the pattern's whole sequence (RS_1, RS_2): ambiguous
+    routes = (
+        '<Route id="R_a"><PrivateCode>R_a</PrivateCode><Description>A</Description>'
+        "<RouteSectionRef>RS_1</RouteSectionRef><RouteSectionRef>RS_2</RouteSectionRef>"
+        "<RouteSectionRef>RS_9</RouteSectionRef></Route>"
+        '<Route id="R_b"><PrivateCode>R_b</PrivateCode><Description>B</Description>'
+        "<RouteSectionRef>RS_1</RouteSectionRef><RouteSectionRef>RS_2</RouteSectionRef>"
+        "<RouteSectionRef>RS_8</RouteSectionRef></Route>"
+    )
+    t = tables(
+        document(
+            routes=routes,
+            route_sections=ROUTE_SECTIONS,
+            journey_patterns=pattern_without_route(),
+        )
+    )
+    assert t["trips"]["route_id"].to_list() == ["S1_L1"]  # ambiguous: synthesised
+    assert t["routes"]["route_id"].to_list() == ["S1_L1"]
+
+
+def test_synthetic_route_when_nothing_matches():
+    t = tables(document(routes="", journey_patterns=pattern_without_route()))
+    assert t["trips"]["route_id"].to_list() == ["S1_L1"]
+    assert t["routes"].to_dict("records") == [
+        {
+            "route_id": "S1_L1",
+            "agency_id": "OId_CV",
+            "route_short_name": "1",
+            "route_long_name": "A - B",
+            "route_type": 3,
+        }
+    ]
+
+
+def test_pattern_with_an_unmapped_link_is_not_matched_to_a_route():
+    routes = (
+        '<Route id="R_1"><PrivateCode>R_1</PrivateCode><Description>A - B</Description>'
+        "<RouteSectionRef>RS_1</RouteSectionRef></Route>"
+    )
+    # the second link has no RouteLinkRef in any RouteSection
+    links = (
+        ("9300WAS1", "9300MIL2", "PT5M"),
+        ("9300MIL2", "9300MIL1", "PT7M", {"route_link": "RL_unknown"}),
+    )
+    t = tables(
+        document(
+            links=links,
+            routes=routes,
+            route_sections=ROUTE_SECTIONS,
+            journey_patterns=pattern_without_route(),
+        )
+    )
+    assert t["trips"]["route_id"].to_list() == ["S1_L1"]
+
+
+def test_route_without_description_uses_line_and_service():
+    routes = '<Route id="R_1"><RouteSectionRef>RS_1</RouteSectionRef></Route>'
+    t = tables(document(routes=routes))
+    assert t["routes"][["route_short_name", "route_long_name"]].to_dict("records") == [
+        {"route_short_name": "1", "route_long_name": "A - B"}
+    ]
+
+
+def test_synthetic_route_ids_are_unique_across_services_and_lines():
+    from transx2gtfs.routes import synthetic_route_ids
+    from transx2gtfs.txc import Line, Route, Service, TxcDocument
+
+    doc = TxcDocument(
+        routes=[Route(id="A_B_C")],
+        services=[
+            Service(code="A", lines=[Line(id="B_C")]),
+            Service(code="A_B", lines=[Line(id="C")]),
+        ],
+    )
+    assert synthetic_route_ids(doc) == {("A", "B_C"): "A_B_C_", ("A_B", "C"): "A_B_C__"}
+
+
+def test_synthetic_route_id_never_collides_with_a_declared_route():
+    routes = (
+        '<Route id="S1_L1"><PrivateCode>S1_L1</PrivateCode><Description>Declared</Description>'
+        "<RouteSectionRef>RS_9</RouteSectionRef></Route>"
+    )
+    t = tables(document(routes=routes, journey_patterns=pattern_without_route()))
+    assert t["trips"]["route_id"].to_list() == ["S1_L1_"]
+    assert t["routes"]["route_id"].to_list() == ["S1_L1_"]
+
+
+def test_same_time_journeys_on_different_lines_get_separate_synthetic_trips():
+    lines = (
+        '<Line id="L1"><LineName>1</LineName></Line>'
+        '<Line id="L2"><LineName>1A</LineName></Line>'
+    )
+    t = tables(
+        document(
+            lines=lines,
+            routes="",
+            journey_patterns=pattern_without_route(),
+            journeys=[journey("VJ_1"), journey("VJ_2", line="L2")],
+        )
+    )
+    assert t["trips"]["trip_id"].is_unique
+    assert sorted(t["trips"]["route_id"]) == ["S1_L1", "S1_L2"]
+    assert sorted(t["routes"]["route_id"]) == ["S1_L1", "S1_L2"]
