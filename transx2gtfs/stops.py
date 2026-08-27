@@ -27,6 +27,16 @@ _stop_columns = ["stop_id", "stop_name", "stop_lat", "stop_lon"]
 
 # One NaPTAN frame per process, keyed by (path, mtime_ns, size)
 _naptan_cache = {}
+# Path set in worker processes by the conversion (takes precedence over the
+# environment) so that every worker reads the file the conversion resolved
+_naptan_override = None
+
+
+def set_naptan_path(path):
+    global _naptan_override
+    _naptan_override = path
+
+
 _osgb36_to_wgs84 = None
 
 
@@ -56,8 +66,9 @@ def default_naptan_path():
 
 
 def get_naptan_path():
-    """Local NaPTAN CSV: TRANSX2GTFS_NAPTAN_PATH if set, else the cached download."""
-    return os.environ.get(NAPTAN_PATH_ENV) or default_naptan_path()
+    """Local NaPTAN CSV: the path handed to a worker, else TRANSX2GTFS_NAPTAN_PATH
+    if set, else the cached download."""
+    return _naptan_override or os.environ.get(NAPTAN_PATH_ENV) or default_naptan_path()
 
 
 def download_naptan(target_file, url=NAPTAN_URL):
@@ -88,7 +99,8 @@ def _is_stale(path):
 
 def ensure_naptan_data(naptan_fp=None, refresh=False):
     """
-    Return the path of a local NaPTAN CSV. A file given explicitly (or through
+    Return the path of a local NaPTAN CSV. A file given explicitly (by the
+    caller, by the conversion to its workers, or through
     ``TRANSX2GTFS_NAPTAN_PATH``) is used as it is and must exist. The cached
     download is fetched when missing, older than ``NAPTAN_MAX_AGE_DAYS`` or
     when ``refresh`` is set; if a refresh fails the cached copy is used with a
@@ -97,7 +109,7 @@ def ensure_naptan_data(naptan_fp=None, refresh=False):
     # Only the download this package manages is ever (re)fetched: a path given
     # by the caller or the environment is used as it is, whatever it points at
     if naptan_fp is None:
-        naptan_fp = os.environ.get(NAPTAN_PATH_ENV)
+        naptan_fp = _naptan_override or os.environ.get(NAPTAN_PATH_ENV)
         managed = not naptan_fp
         if managed:
             naptan_fp = default_naptan_path()

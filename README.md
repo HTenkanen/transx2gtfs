@@ -100,6 +100,14 @@ skip_superseded : bool (default is True)
     Leave out files superseded by a newer version of the same service: per ServiceCode, among
     versions whose operating periods overlap only the highest RevisionNumber is converted.
     Dropped files are printed.
+
+naptan_path : str (default is None)
+    Local NaPTAN CSV to read stop coordinates from. By default TRANSX2GTFS_NAPTAN_PATH is used
+    if set, else a copy downloaded into the user's cache directory (refreshed when older than
+    30 days).
+
+refresh_naptan : bool (default is False)
+    Download the NaPTAN data anew even if the cached copy is recent.
 ```
 
 The conversion runs in worker processes. On macOS and Windows those are started with
@@ -124,7 +132,7 @@ $ transx2gtfs --help
 
 Options: `--append` (append to the intermediate database of a previous run), `--workers N`,
 `--file-size-limit MB`, `--keep-superseded` (convert every file, also versions superseded by a
-newer revision of the same service) and `--version`.
+newer revision of the same service), `--naptan-path FILE`, `--refresh-naptan` and `--version`.
 
 ### Stop and bank holiday data
 
@@ -133,8 +141,9 @@ Stop coordinates are read from the national NaPTAN dataset, which is downloaded 
 `~/Library/Caches/transx2gtfs` on macOS, `%LOCALAPPDATA%\transx2gtfs` on Windows; override
 with `TRANSX2GTFS_CACHE_DIR`), reused on later runs and refreshed when older than 30 days (if
 the refresh fails, the cached copy is used with a warning). To use a local copy instead (for
-example when working offline), point `TRANSX2GTFS_NAPTAN_PATH` at a NaPTAN CSV file downloaded
-from https://naptan.api.dft.gov.uk/v1/access-nodes?dataFormat=csv.
+example when working offline), pass `naptan_path=` / `--naptan-path` or point
+`TRANSX2GTFS_NAPTAN_PATH` at a NaPTAN CSV file downloaded from
+https://naptan.api.dft.gov.uk/v1/access-nodes?dataFormat=csv.
 Bank holidays are read from [gov.uk](https://www.gov.uk/bank-holidays.json), falling back to a
 copy bundled with the package; `TRANSX2GTFS_BANK_HOLIDAYS_PATH` can point at a local copy of
 that JSON file.
