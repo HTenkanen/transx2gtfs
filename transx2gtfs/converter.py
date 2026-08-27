@@ -48,12 +48,22 @@ import os
 import multiprocessing
 from transx2gtfs.stop_times import get_stop_times, get_frequencies
 from transx2gtfs.stops import get_stops, ensure_naptan_data
+from transx2gtfs.bank_holidays import (
+    remove_bank_holidays_snapshot,
+    set_bank_holidays_path,
+    snapshot_bank_holidays_data,
+)
 from transx2gtfs.trips import get_trips
 from transx2gtfs.routes import get_routes
 from transx2gtfs.agency import get_agency
 from transx2gtfs.calendar import get_calendar
 from transx2gtfs.calendar_dates import get_calendar_dates
-from transx2gtfs.dataio import generate_gtfs_export, save_to_gtfs_zip, get_xml_paths
+from transx2gtfs.dataio import (
+    _table_exists,
+    generate_gtfs_export,
+    save_to_gtfs_zip,
+    get_xml_paths,
+)
 from transx2gtfs.dataio import (
     read_xml_inside_nested_zip,
     read_xml_inside_zip,
@@ -66,9 +76,24 @@ from transx2gtfs.distribute import create_workers
 _db_lock = None
 
 
-def _init_worker(lock):
+def _row_count(gtfs_db, table):
+    """Rows of a table of the database; 0 when the table (or database) is absent"""
+    if not os.path.exists(gtfs_db):
+        return 0
+    conn = sqlite3.connect(gtfs_db)
+    try:
+        if not _table_exists(conn, table):
+            return 0
+        return conn.execute("SELECT COUNT(*) FROM %s" % table).fetchone()[0]
+    finally:
+        conn.close()
+
+
+def _init_worker(lock, bank_holidays_path=None):
     global _db_lock
     _db_lock = lock
+    if bank_holidays_path is not None:
+        set_bank_holidays_path(bank_holidays_path)
 
 
 def process_files(parallel):
@@ -232,32 +257,48 @@ def convert(
             "Did not find any TransXChange .xml files from '%s'." % input_filepath
         )
 
-    # Make sure the NaPTAN stop data is available before the workers start
+    # Make sure the NaPTAN stop data and one immutable bank holiday snapshot are
+    # available before the workers start; the snapshot only lives while they run
     ensure_naptan_data()
+    rows_before = _row_count(gtfs_db, "stop_times")
+    snapshot = snapshot_bank_holidays_data()
+    try:
+        # Iterate over files
+        print("Populating database ..")
 
-    # Iterate over files
-    print("Populating database ..")
+        # Create workers
+        workers = create_workers(
+            input_files=files,
+            worker_cnt=worker_cnt,
+            file_size_limit=file_size_limit,
+            gtfs_db=gtfs_db,
+        )
 
-    # Create workers
-    workers = create_workers(
-        input_files=files,
-        worker_cnt=worker_cnt,
-        file_size_limit=file_size_limit,
-        gtfs_db=gtfs_db,
-    )
-
-    # Generate GTFS info to the database in parallel; workers take turns writing
-    lock = multiprocessing.Lock()
-    with multiprocessing.Pool(
-        processes=len(workers), initializer=_init_worker, initargs=(lock,)
-    ) as pool:
-        pool.map(process_files, workers)
+        # Generate GTFS info to the database in parallel; workers take turns writing
+        lock = multiprocessing.Lock()
+        with multiprocessing.Pool(
+            processes=len(workers),
+            initializer=_init_worker,
+            initargs=(lock, snapshot),
+        ) as pool:
+            pool.map(process_files, workers)
+    finally:
+        # An in-process pool runs the initializer in this process
+        set_bank_holidays_path(None)
+        remove_bank_holidays_snapshot(snapshot)
 
     # Print information about the total time
     tot_end_t = timeit()
     tot_duration = (tot_end_t - tot_start_t) / 60
     print("===========================================================")
     print("It took %s minutes in total." % round(tot_duration, 1))
+
+    # Nothing to export when no file of this conversion produced trips (all
+    # journeys skipped), whatever an existing database already holds
+    if _row_count(gtfs_db, "stop_times") == rows_before:
+        raise ValueError(
+            "The TransXChange files in '%s' did not produce any trips." % input_filepath
+        )
 
     # Generate output dictionary
     gtfs_data = generate_gtfs_export(gtfs_db)

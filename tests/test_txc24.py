@@ -1,8 +1,11 @@
 """Tests for TransXChange 2.4/2.5 conversion, on documents built from parts."""
 
+import os
 import warnings
 
 import pytest
+
+import transx2gtfs
 
 from transx2gtfs.agency import get_agency
 from transx2gtfs.bank_holidays import detect_division
@@ -821,7 +824,7 @@ def test_same_time_journeys_with_different_calendar_bounds_keep_separate_trips()
     assert sorted(t["calendar"]["start_date"]) == ["20270104", "20270329"]
 
 
-def test_document_whose_journeys_never_operate_yields_an_empty_table():
+def test_document_whose_journeys_never_operate_converts_to_nothing(tmp_path):
     prof = profile(special_days=special(non_operation=[("2026-12-01", "2027-04-30")]))
     with pytest.warns(UserWarning, match="no vehicle journey operates"):
         info = get_gtfs_info(
@@ -830,6 +833,26 @@ def test_document_whose_journeys_never_operate_yields_an_empty_table():
     assert len(info) == 0 and list(info.columns) == GTFS_INFO_COLUMNS
     assert len(get_stop_times(info)) == 0
     assert get_calendar_dates(info) is None and get_frequencies(info) is None
+
+    (tmp_path / "never").mkdir()
+    (tmp_path / "never" / "never.xml").write_bytes(
+        document(journeys=[journey("VJ_1", profile=prof)])
+    )
+    output = str(tmp_path / "gtfs.zip")
+    with pytest.raises(ValueError, match="did not produce any trips"):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            transx2gtfs.convert(str(tmp_path / "never"), output, worker_cnt=1)
+    # also when appending to a database that already holds trips
+    (tmp_path / "some").mkdir()
+    (tmp_path / "some" / "some.xml").write_bytes(document())
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        transx2gtfs.convert(str(tmp_path / "some"), output, worker_cnt=1)
+        with pytest.raises(ValueError, match="did not produce any trips"):
+            transx2gtfs.convert(
+                str(tmp_path / "never"), output, append_to_existing=True, worker_cnt=1
+            )
 
 
 def test_journeys_whose_every_operating_day_is_removed_never_operate():
@@ -1602,3 +1625,67 @@ def test_same_time_journeys_on_different_lines_get_separate_synthetic_trips():
     assert t["trips"]["trip_id"].is_unique
     assert sorted(t["trips"]["route_id"]) == ["S1_L1", "S1_L2"]
     assert sorted(t["routes"]["route_id"]) == ["S1_L1", "S1_L2"]
+
+
+# Conversion -----------------------------------------------------------------------
+
+
+def test_convert_removes_its_snapshot_and_leaves_the_environment_alone(
+    monkeypatch, tmp_path, data_dir
+):
+    from transx2gtfs import bank_holidays as bh_module
+
+    monkeypatch.setattr(bh_module.tempfile, "gettempdir", lambda: str(tmp_path))
+    before = dict(os.environ)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        transx2gtfs.convert(data_dir, str(tmp_path / "gtfs.zip"), worker_cnt=1)
+    assert dict(os.environ) == before
+    assert list(tmp_path.glob("transx2gtfs-*")) == []
+    assert bh_module._bank_holidays_override is None
+
+
+def test_convert_resets_the_override_of_an_in_process_pool(monkeypatch, tmp_path):
+    from transx2gtfs import bank_holidays as bh_module
+    from transx2gtfs import converter
+
+    monkeypatch.setattr(bh_module.tempfile, "gettempdir", lambda: str(tmp_path))
+    seen = []
+
+    class InProcessPool:
+        """A pool running the initializer and the work in the calling process"""
+
+        def __init__(self, processes, initializer, initargs):
+            initializer(*initargs)
+            seen.append(bh_module._bank_holidays_override)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def map(self, function, items):
+            return [function(item) for item in items]
+
+    monkeypatch.setattr(converter.multiprocessing, "Pool", InProcessPool)
+    (tmp_path / "in").mkdir()
+    (tmp_path / "in" / "some.xml").write_bytes(document())
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        transx2gtfs.convert(
+            str(tmp_path / "in"), str(tmp_path / "gtfs.zip"), worker_cnt=1
+        )
+    assert seen and seen[0].startswith(str(tmp_path))
+    assert bh_module._bank_holidays_override is None
+    assert list(tmp_path.glob("transx2gtfs-*")) == []
+    # the same after a failure inside the pool
+    monkeypatch.setattr(InProcessPool, "map", lambda self, f, items: 1 / 0)
+    with pytest.raises(ZeroDivisionError):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            transx2gtfs.convert(
+                str(tmp_path / "in"), str(tmp_path / "gtfs.zip"), worker_cnt=1
+            )
+    assert bh_module._bank_holidays_override is None
+    assert list(tmp_path.glob("transx2gtfs-*")) == []

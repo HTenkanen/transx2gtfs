@@ -12,6 +12,7 @@ and friends) are the gov.uk entries observed on a day other than the fixed date.
 
 import io
 import os
+import tempfile
 import urllib.request
 import warnings
 from datetime import date, timedelta
@@ -96,9 +97,10 @@ def _normalise_title(title):
 
 
 def _bank_holidays_bytes():
-    """The feed to use: TRANSX2GTFS_BANK_HOLIDAYS_PATH, else gov.uk, else the
-    packaged copy; validated as JSON before it is returned."""
-    local_path = os.environ.get(BANK_HOLIDAYS_PATH_ENV)
+    """The feed to use: the snapshot handed to a worker, else
+    TRANSX2GTFS_BANK_HOLIDAYS_PATH, else gov.uk, else the packaged copy;
+    validated as JSON before it is returned."""
+    local_path = _bank_holidays_override or os.environ.get(BANK_HOLIDAYS_PATH_ENV)
     if local_path:
         with open(local_path, "rb") as f:
             data = f.read()
@@ -116,13 +118,60 @@ def _bank_holidays_bytes():
     return data
 
 
+# Path set in worker processes by the conversion (takes precedence over the
+# environment) so that every worker of one conversion reads the same snapshot
+_bank_holidays_override = None
+
+
+def set_bank_holidays_path(path):
+    global _bank_holidays_override
+    _bank_holidays_override = path
+
+
+def snapshot_bank_holidays_data():
+    """
+    Write the bank holiday feed to use into a new private directory and return
+    the file path; ``convert()`` hands it to its workers and removes it when
+    they are done, so one conversion reads one immutable snapshot.
+    """
+    data = _bank_holidays_bytes()
+    directory = tempfile.mkdtemp(prefix="transx2gtfs-")
+    snapshot = os.path.join(directory, "bank-holidays.json")
+    try:
+        with open(snapshot, "wb") as f:
+            f.write(data)
+    except BaseException:
+        remove_bank_holidays_snapshot(snapshot)
+        raise
+    return snapshot
+
+
+def remove_bank_holidays_snapshot(snapshot):
+    """Remove a snapshot written by :func:`snapshot_bank_holidays_data` (and its
+    directory); an already removed snapshot is fine, other failures warn"""
+    for target, remove in (
+        (snapshot, os.remove),
+        (os.path.dirname(snapshot), os.rmdir),
+    ):
+        try:
+            remove(target)
+        except FileNotFoundError:
+            pass
+        except OSError as error:
+            warnings.warn(
+                "Could not remove the bank holiday snapshot %s: %s" % (target, error),
+                UserWarning,
+                stacklevel=2,
+            )
+
+
 def read_bank_holidays():
     """
     Read the gov.uk bank holiday feed as a DataFrame with columns
     ``division``, ``title``, ``date`` (datetime.date).
 
-    Uses ``TRANSX2GTFS_BANK_HOLIDAYS_PATH`` if set, else gov.uk, else the
-    packaged copy.
+    Uses the snapshot handed to a worker, else ``TRANSX2GTFS_BANK_HOLIDAYS_PATH``
+    if set, else gov.uk, else the packaged copy.
     """
     bholidays = pd.read_json(io.BytesIO(_bank_holidays_bytes()))
 

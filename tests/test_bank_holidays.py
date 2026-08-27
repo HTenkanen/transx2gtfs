@@ -1,11 +1,13 @@
 """Tests for the TransXChange bank-holiday table (transx2gtfs.bank_holidays)."""
 
+import os
 from datetime import date
 
 import pandas as pd
 import pytest
 
 from transx2gtfs import bank_holidays as bh_module
+from transx2gtfs.data import get_path
 from transx2gtfs.bank_holidays import (
     GROUP_SELECTORS,
     KNOWN_NAMES,
@@ -196,3 +198,58 @@ def test_get_bank_holiday_dates_covers_every_feed_division():
     assert get_bank_holiday_dates(march) == ["20270317", "20270326", "20270329"]
     quiet = pd.DataFrame({"start_date": ["20270601"], "end_date": ["20270630"]})
     assert get_bank_holiday_dates(quiet) is None
+
+
+def test_snapshots_are_private_copies_of_the_configured_feed(monkeypatch, tmp_path):
+    monkeypatch.setattr(bh_module.tempfile, "gettempdir", lambda: str(tmp_path))
+    # a known feed: the packaged copy, in a file of our own
+    source = tmp_path / "feed.json"
+    source.write_bytes(open(get_path("bank_holidays"), "rb").read())
+    feed = source.read_bytes()
+    monkeypatch.setenv("TRANSX2GTFS_BANK_HOLIDAYS_PATH", str(source))
+    first = bh_module.snapshot_bank_holidays_data()
+    second = bh_module.snapshot_bank_holidays_data()
+    third = bh_module.snapshot_bank_holidays_data()
+    assert first != second
+    assert open(first, "rb").read() == feed
+    # snapshots are copies: changing the source afterwards does not affect them
+    source.write_bytes(b"{}")
+    assert open(first, "rb").read() == feed
+    # a directory that cannot be removed is reported, not hidden
+    (tmp_path / "keep").mkdir()
+    os.rename(tmp_path / "keep", os.path.join(os.path.dirname(third), "keep"))
+    with pytest.warns(UserWarning, match="Could not remove the bank holiday snapshot"):
+        bh_module.remove_bank_holidays_snapshot(third)
+    assert not os.path.exists(third)
+    os.rmdir(os.path.join(os.path.dirname(third), "keep"))
+    os.rmdir(os.path.dirname(third))
+    assert open(first, "rb").read() == open(second, "rb").read()
+    assert first.startswith(str(tmp_path))
+    if os.name != "nt":  # Windows has no POSIX directory modes
+        assert oct(os.stat(os.path.dirname(first)).st_mode & 0o777) == "0o700"
+    # a worker reads the snapshot it was given, whatever the environment says
+    monkeypatch.setenv("TRANSX2GTFS_BANK_HOLIDAYS_PATH", str(tmp_path / "missing.json"))
+    bh_module.set_bank_holidays_path(first)
+    try:
+        assert len(bh_module.read_bank_holidays()) > 0
+    finally:
+        bh_module.set_bank_holidays_path(None)
+    bh_module.remove_bank_holidays_snapshot(first)
+    bh_module.remove_bank_holidays_snapshot(second)
+    assert list(tmp_path.glob("transx2gtfs-*")) == []
+    # removing a snapshot twice is harmless
+    bh_module.remove_bank_holidays_snapshot(first)
+
+
+def test_a_failed_snapshot_leaves_no_directory_behind(monkeypatch, tmp_path):
+    monkeypatch.setattr(bh_module.tempfile, "gettempdir", lambda: str(tmp_path))
+    # the feed is read fine; writing the snapshot fails after mkdtemp
+    monkeypatch.setattr(bh_module, "_bank_holidays_bytes", lambda: b"{}")
+
+    def fail(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("builtins.open", fail)
+    with pytest.raises(OSError, match="disk full"):
+        bh_module.snapshot_bank_holidays_data()
+    assert list(tmp_path.glob("transx2gtfs-*")) == []
