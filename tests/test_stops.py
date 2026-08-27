@@ -16,7 +16,7 @@ REQUIRED_COLUMNS = ["stop_id", "stop_name", "stop_lat", "stop_lon"]
 def test_read_naptan_stops():
     stops = read_naptan_stops()
     assert list(stops.columns) == REQUIRED_COLUMNS
-    assert len(stops) == 49
+    assert len(stops) == 283
     assert stops["stop_id"].is_unique
     assert pd.api.types.is_string_dtype(stops["stop_id"])
 

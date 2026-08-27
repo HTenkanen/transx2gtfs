@@ -1,8 +1,11 @@
 """Tests for TransXChange 2.4/2.5 conversion, on documents built from parts."""
 
+import io
 import os
 import warnings
+from zipfile import ZipFile
 
+import pandas as pd
 import pytest
 
 import transx2gtfs
@@ -20,6 +23,8 @@ from transx2gtfs.transxchange import (
 )
 from transx2gtfs.trips import get_trips
 from transx2gtfs.txc import read_txc
+
+from conftest import DATA_DIR
 
 STOPS = ["9300WAS1", "9300MIL2", "9300MIL1", "490007705N"]
 
@@ -1689,3 +1694,44 @@ def test_convert_resets_the_override_of_an_in_process_pool(monkeypatch, tmp_path
             )
     assert bh_module._bank_holidays_override is None
     assert list(tmp_path.glob("transx2gtfs-*")) == []
+
+
+# End to end ------------------------------------------------------------------------
+
+
+def test_convert_txc24_fixtures(tmp_path):
+    output = str(tmp_path / "gtfs.zip")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        transx2gtfs.convert(str(DATA_DIR / "txc24"), output, worker_cnt=2)
+    with ZipFile(output) as zf:
+        names = set(zf.namelist())
+        gtfs = {n: pd.read_csv(io.BytesIO(zf.read(n)), dtype=str) for n in names}
+    assert {
+        "agency.txt",
+        "stops.txt",
+        "routes.txt",
+        "trips.txt",
+        "stop_times.txt",
+        "calendar.txt",
+        "calendar_dates.txt",
+        "frequencies.txt",
+    } <= names
+    stop_times = gtfs["stop_times.txt"]
+    assert set(stop_times["trip_id"]) == set(gtfs["trips.txt"]["trip_id"])
+    # one London stop of the 403 is not in the current NaPTAN
+    assert set(stop_times["stop_id"]) - set(gtfs["stops.txt"]["stop_id"]) == {
+        "490006706C13"
+    }
+    assert set(gtfs["trips.txt"]["route_id"]) <= set(gtfs["routes.txt"]["route_id"])
+    assert set(gtfs["routes.txt"]["agency_id"]) <= set(gtfs["agency.txt"]["agency_id"])
+    assert set(gtfs["trips.txt"]["service_id"]) == set(
+        gtfs["calendar.txt"]["service_id"]
+    )
+    assert set(gtfs["calendar_dates.txt"]["service_id"]) <= set(
+        gtfs["calendar.txt"]["service_id"]
+    )
+    assert set(gtfs["frequencies.txt"]["trip_id"]) <= set(gtfs["trips.txt"]["trip_id"])
+    # three of the four files produce trips (the HRCS2 journeys never operate:
+    # HolidaysOnly with every holiday removed), so three operators
+    assert sorted(gtfs["agency.txt"]["agency_id"]) == ["7778078", "FAB", "tkt_oid"]

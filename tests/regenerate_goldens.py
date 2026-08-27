@@ -11,9 +11,8 @@ sys.path.insert(0, str(TESTS_DIR))
 sys.path.insert(0, str(TESTS_DIR.parent))
 
 from transx2gtfs.data import get_path  # noqa: E402
-from transx2gtfs.txc import read_txc  # noqa: E402
-from conftest import DATA_DIR, UNPACKED_DIR  # noqa: E402
-from test_golden import FIXTURES, TABLES, gtfs_tables  # noqa: E402
+from conftest import DATA_DIR  # noqa: E402
+from test_golden import FIXTURES, TABLES, gtfs_tables, read_fixture  # noqa: E402
 
 # Tables larger than a few hundred rows are stored zipped, the others as CSV
 ZIP_ROWS = 500
@@ -40,7 +39,7 @@ def main():
         directory.mkdir(parents=True, exist_ok=True)
         for old in list(directory.glob("*.csv")) + list(directory.glob("*.zip")):
             old.unlink()
-        tables = gtfs_tables(read_txc(UNPACKED_DIR / (fixture + ".xml")))
+        tables = gtfs_tables(read_fixture(fixture))
         for table in TABLES:
             frame = tables[table]
             if frame is None:
