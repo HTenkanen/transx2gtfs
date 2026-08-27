@@ -83,6 +83,14 @@ from transx2gtfs.distribute import create_workers
 _db_lock = None
 
 
+def intermediate_db_path(output_filepath):
+    """The SQLite database of a conversion, beside the output: 'feed.zip' ->
+    'feed.db'; any other name gets '.db' appended ('feed.ZIP' -> 'feed.ZIP.db')"""
+    if output_filepath.endswith(".zip"):
+        return output_filepath[: -len(".zip")] + ".db"
+    return output_filepath + ".db"
+
+
 def _row_count(gtfs_db, table):
     """Rows of a table of the database; 0 when the table (or database) is absent"""
     if not os.path.exists(gtfs_db):
@@ -286,7 +294,9 @@ def convert(
     output_filepath : str
         Full filepath to the output GTFS zip-file, e.g. '/home/myuser/data/my_gtfs.zip'
     append_to_existing : bool (default is False)
-        Flag for appending to existing gtfs-database. This might be useful if you
+        Flag for appending to existing gtfs-database (the database of the same
+        output file, '<output without .zip>.db' next to it: 'my_gtfs.zip' uses
+        'my_gtfs.db'). This might be useful if you
         have TransXchange .xml files distributed into multiple directories (e.g.
         separate files for train data, tube data and bus data) and you want to merge
         all those datasets into a single GTFS feed.
@@ -312,9 +322,9 @@ def convert(
     # Total start
     tot_start_t = timeit()
 
-    # Filepath for temporary gtfs db
-    target_dir = os.path.dirname(output_filepath)
-    gtfs_db = os.path.join(target_dir, "gtfs.db")
+    # Filepath for the intermediate database: next to the output, named after
+    # it, so that conversions into one folder do not share a database
+    gtfs_db = intermediate_db_path(output_filepath)
 
     # If append to database is false remove previous gtfs-database if it exists
     if not append_to_existing:

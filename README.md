@@ -85,7 +85,9 @@ output_filepath : str
     Full filepath to the output GTFS zip-file, e.g. '/home/myuser/data/my_gtfs.zip'
 
 append_to_existing : bool (default is False)
-    Flag for appending to existing gtfs-database. This might be useful if you have
+    Flag for appending to existing gtfs-database (the database of the same output file,
+    `<output without .zip>.db` next to it: `my_gtfs.zip` uses `my_gtfs.db`). This might be
+    useful if you have
     TransXchange .xml files distributed into multiple directories (e.g. separate files for
     train data, tube data and bus data) and you want to merge all those datasets into a single
     GTFS feed.
@@ -130,7 +132,8 @@ $ transx2gtfs data/my_transxchange_files data/my_converted_gtfs.zip
 $ transx2gtfs --help
 ```
 
-Options: `--append` (append to the intermediate database of a previous run), `--workers N`,
+Options: `--append` (append to the intermediate database of a previous run with the same
+output file), `--workers N`,
 `--file-size-limit MB`, `--keep-superseded` (convert every file, also versions superseded by a
 newer revision of the same service), `--naptan-path FILE`, `--refresh-naptan` and `--version`.
 

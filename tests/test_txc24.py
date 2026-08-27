@@ -1978,3 +1978,39 @@ def test_a_document_whose_stops_are_all_unknown_converts_to_nothing(tmp_path):
             transx2gtfs.convert(
                 str(tmp_path / "in"), str(tmp_path / "gtfs.zip"), worker_cnt=1
             )
+
+
+# Intermediate database ------------------------------------------------------------
+
+
+def test_intermediate_database_is_named_after_the_output(tmp_path):
+    from transx2gtfs.converter import intermediate_db_path
+
+    assert intermediate_db_path("/out/feed.zip") == "/out/feed.db"
+    # other names keep their full name, so distinct outputs get distinct databases
+    assert intermediate_db_path("/out/feed.ZIP") == "/out/feed.ZIP.db"
+    assert intermediate_db_path("/out/feed.gtfs") == "/out/feed.gtfs.db"
+    folders = {}
+    for name, departure in (("a", "08:00:00"), ("b", "09:00:00")):
+        folder = tmp_path / name
+        folder.mkdir()
+        (folder / "some.xml").write_bytes(
+            document(journeys=[journey("VJ_1", departure=departure)])
+        )
+        folders[name] = str(folder)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        transx2gtfs.convert(folders["a"], str(tmp_path / "a.zip"), worker_cnt=1)
+        transx2gtfs.convert(folders["b"], str(tmp_path / "b.zip"), worker_cnt=1)
+    # each output has its own feed and database; no shared gtfs.db
+    assert departures(str(tmp_path / "a.zip")) == ["08:00:00"]
+    assert departures(str(tmp_path / "b.zip")) == ["09:00:00"]
+    assert sorted(p.name for p in tmp_path.glob("*.db")) == ["a.db", "b.db"]
+    # appending targets the database of the same output
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        transx2gtfs.convert(
+            folders["b"], str(tmp_path / "a.zip"), append_to_existing=True, worker_cnt=1
+        )
+    assert departures(str(tmp_path / "a.zip")) == ["08:00:00", "09:00:00"]
+    assert departures(str(tmp_path / "b.zip")) == ["09:00:00"]
