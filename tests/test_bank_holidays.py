@@ -177,6 +177,26 @@ def test_bank_holidays_fall_back_to_the_packaged_copy_offline(monkeypatch):
     assert len(read_bank_holidays()) > 0 and len(calls) == 1
 
 
+def test_bank_holidays_fall_back_when_the_download_is_truncated(monkeypatch, capsys):
+    monkeypatch.delenv("TRANSX2GTFS_BANK_HOLIDAYS_PATH", raising=False)
+
+    class Truncated:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            raise bh_module.http.client.IncompleteRead(b"{", 100)
+
+    monkeypatch.setattr(
+        bh_module.urllib.request, "urlopen", lambda *a, **k: Truncated()
+    )
+    assert len(read_bank_holidays()) > 0
+    assert "using static file" in capsys.readouterr().out
+
+
 def test_detect_division_by_stop_area_codes():
     def doc(*codes):
         return TxcDocument(stop_points=[StopPoint(atco_code=c) for c in codes])
