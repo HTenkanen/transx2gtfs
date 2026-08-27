@@ -1,6 +1,7 @@
 """Tests for TransXChange 2.4/2.5 conversion, on documents built from parts."""
 
 import io
+import logging
 import os
 import warnings
 from zipfile import ZipFile
@@ -1766,28 +1767,30 @@ def departures(output):
     return sorted(stop_times[stop_times["stop_sequence"] == "1"]["departure_time"])
 
 
-def test_convert_skips_superseded_files(tmp_path, capsys):
+def test_convert_skips_superseded_files(tmp_path, caplog):
     folder = tmp_path / "in"
     folder.mkdir()
     (folder / "old.xml").write_bytes(revision(3, "08:00:00"))
     (folder / "new.xml").write_bytes(revision(16, "09:00:00"))
     output = str(tmp_path / "gtfs.zip")
+    caplog.set_level(logging.INFO, logger="transx2gtfs")
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         transx2gtfs.convert(str(folder), output, worker_cnt=1)
     assert departures(output) == ["09:00:00"]
-    out = capsys.readouterr().out
+    out = caplog.text
     assert (
         "Skipping old.xml (ServiceCode S1, revision 3): superseded by new.xml "
         "(revision 16)"
     ) in out
     assert "Skipped 1 superseded file(s)." in out
 
+    caplog.clear()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         transx2gtfs.convert(str(folder), output, worker_cnt=1, skip_superseded=False)
     assert departures(output) == ["08:00:00", "09:00:00"]
-    assert "superseded by" not in capsys.readouterr().out
+    assert "superseded by" not in caplog.text
 
 
 def test_superseded_files_inside_archives_are_skipped_too(tmp_path):
@@ -1823,15 +1826,16 @@ def test_cli_keeps_superseded_files_on_request(tmp_path):
     assert departures(output) == ["08:00:00", "09:00:00"]
 
 
-def test_files_whose_header_cannot_be_read_are_kept(tmp_path, capsys):
+def test_files_whose_header_cannot_be_read_are_kept(tmp_path, caplog):
     from transx2gtfs.converter import select_files
 
     good = tmp_path / "good.xml"
     good.write_bytes(revision(3, "08:00:00"))
     broken = tmp_path / "broken.xml"
     broken.write_bytes(b"<TransXChange><Services><Service>")
+    caplog.set_level(logging.INFO, logger="transx2gtfs")
     assert select_files([str(good), str(broken)]) == [str(good), str(broken)]
-    assert "Could not read the header of broken.xml" in capsys.readouterr().out
+    assert "Could not read the header of broken.xml" in caplog.text
 
 
 # NaPTAN options -------------------------------------------------------------------
@@ -2079,3 +2083,304 @@ def test_convert_skips_broken_files_and_fails_only_when_nothing_converts(tmp_pat
         warnings.simplefilter("ignore")
         with pytest.raises(ValueError, match="did not produce any trips"):
             transx2gtfs.convert(str(folder), output, worker_cnt=1)
+
+
+# Logging --------------------------------------------------------------------------
+
+
+def test_log_file_holds_progress_and_worker_warnings_and_appends(tmp_path):
+    from transx2gtfs.logs import log
+
+    folder = tmp_path / "in"
+    folder.mkdir()
+    (folder / "good.xml").write_bytes(document())
+    (folder / "malformed.xml").write_bytes(b"<TransXChange><Services>")
+    # a file converting fine but with a data problem the worker warns about
+    # (a newer revision of the same service, so it is the one converted)
+    (folder / "odd.xml").write_bytes(
+        document(
+            links=(
+                ("9300WAS1", "9300MIL2", "PT5M"),
+                ("9300MIL2", "0000UNKNOWN", "PT5M"),
+            ),
+            journeys=[journey("VJ_1", departure="09:00:00")],
+            root_attributes=' RevisionNumber="2"',
+        )
+    )
+    output = str(tmp_path / "gtfs.zip")
+    log_file = tmp_path / "run.log"
+    # warnings are recorded, not ignored: forked workers inherit the filters
+    with warnings.catch_warnings(record=True):
+        warnings.simplefilter("always")
+        transx2gtfs.convert(str(folder), output, worker_cnt=1, log_file=str(log_file))
+    text = log_file.read_text()
+    assert "INFO Skipping good.xml (ServiceCode S1, revision None)" in text
+    assert "Processing TransXChange file: odd.xml" in text
+    assert "WARNING UserWarning: malformed.xml: skipped, XMLSyntaxError" in text
+    assert "WARNING UserWarning: Did not find a NaPTAN stop for '0000UNKNOWN'" in text
+    assert "WARNING UserWarning: odd.xml: 1 stop_times row(s) at stops missing" in text
+    assert "INFO GTFS zipfile was saved to:" in text
+    assert not [h for h in log.handlers if getattr(h, "transx2gtfs_file", False)]
+    # a second run appends
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        transx2gtfs.convert(str(folder), output, worker_cnt=1, log_file=str(log_file))
+    assert log_file.read_text().count("GTFS zipfile was saved to:") == 2
+    # the file handler is removed even when the conversion fails
+    with pytest.raises(ValueError, match="is not a directory or a .zip file"):
+        transx2gtfs.convert(
+            str(tmp_path / "missing"), output, worker_cnt=1, log_file=str(log_file)
+        )
+    assert not [h for h in log.handlers if getattr(h, "transx2gtfs_file", False)]
+    # without log_file nothing is written
+    other = tmp_path / "other"
+    other.mkdir()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        transx2gtfs.convert(str(folder), str(other / "gtfs.zip"), worker_cnt=1)
+    assert list(other.glob("*.log")) == []
+
+
+def test_console_handler_is_added_once_and_only_when_logging_is_unconfigured():
+    from transx2gtfs import logs
+
+    logger = logging.getLogger("transx2gtfs")
+    root = logging.getLogger()
+    saved, saved_root, level = list(logger.handlers), list(root.handlers), logger.level
+    try:
+        logger.handlers.clear()
+        root.handlers.clear()
+        logger.setLevel(logging.NOTSET)
+        logs.configure_console()
+        logs.configure_console()
+        console = [
+            h for h in logger.handlers if getattr(h, "transx2gtfs_console", False)
+        ]
+        assert len(console) == 1 and console[0].stream is logs.sys.stdout
+        assert logger.level == logging.INFO
+        # an application that configured the root logger keeps its own handlers
+        # and levels
+        logger.handlers.clear()
+        logger.setLevel(logging.NOTSET)
+        root.addHandler(logging.NullHandler())
+        logs.configure_console()
+        assert logger.handlers == [] and logger.level == logging.NOTSET
+        # a finer application level is kept when the package adds its handler,
+        # which itself shows INFO and above only
+        root.handlers.clear()
+        logger.setLevel(logging.DEBUG)
+        logs.configure_console()
+        assert logger.level == logging.DEBUG
+        (console,) = [
+            h for h in logger.handlers if getattr(h, "transx2gtfs_console", False)
+        ]
+        assert console.level == logging.INFO
+    finally:
+        logger.handlers[:] = saved
+        root.handlers[:] = saved_root
+        logger.setLevel(level)
+
+
+def test_console_output_is_progress_on_stdout_and_each_warning_once(capsys):
+    from transx2gtfs import logs
+
+    logger = logging.getLogger("transx2gtfs")
+    root = logging.getLogger()
+    saved, saved_root, level = list(logger.handlers), list(root.handlers), logger.level
+    try:
+        logger.handlers.clear()
+        root.handlers.clear()
+        logs.configure_console()
+        with logs.mirror_warnings():
+            logs.log.info("Processing %s", "some.xml")
+            with pytest.warns(UserWarning, match="data problem"):
+                warnings.warn("data problem", UserWarning, stacklevel=2)
+        out = capsys.readouterr().out
+        assert "Processing some.xml" in out
+        assert "data problem" not in out  # the warnings module shows it once
+    finally:
+        logger.handlers[:] = saved
+        root.handlers[:] = saved_root
+        logger.setLevel(level)
+
+
+def test_convert_restores_the_logger_level(tmp_path):
+    logger = logging.getLogger("transx2gtfs")
+    level = logger.level
+    folder = tmp_path / "in"
+    folder.mkdir()
+    (folder / "some.xml").write_bytes(document())
+    try:
+        logger.setLevel(logging.ERROR)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            transx2gtfs.convert(
+                str(folder),
+                str(tmp_path / "gtfs.zip"),
+                worker_cnt=1,
+                log_file=str(tmp_path / "run.log"),
+            )
+        assert logger.level == logging.ERROR
+        assert "GTFS zipfile was saved to:" in (tmp_path / "run.log").read_text()
+        # also when the log file cannot be opened
+        with pytest.raises(FileNotFoundError):
+            transx2gtfs.convert(
+                str(folder),
+                str(tmp_path / "gtfs.zip"),
+                worker_cnt=1,
+                log_file=str(tmp_path / "missing" / "run.log"),
+            )
+        assert logger.level == logging.ERROR
+    finally:
+        logger.setLevel(level)
+
+
+def test_second_conversion_still_shows_progress_on_the_fallback_console(
+    tmp_path, capsys
+):
+    from transx2gtfs import logs
+
+    logger = logging.getLogger("transx2gtfs")
+    root = logging.getLogger()
+    saved, saved_root, level = list(logger.handlers), list(root.handlers), logger.level
+    folder = tmp_path / "in"
+    folder.mkdir()
+    (folder / "some.xml").write_bytes(document())
+    try:
+        logger.handlers.clear()
+        root.handlers.clear()
+        logger.setLevel(logging.NOTSET)
+        for _ in range(2):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                transx2gtfs.convert(
+                    str(folder), str(tmp_path / "gtfs.zip"), worker_cnt=1
+                )
+            assert "GTFS zipfile was saved to:" in capsys.readouterr().out
+            assert logger.level == logging.NOTSET  # restored, handler kept
+        assert logs.console_in_use()
+    finally:
+        logger.handlers[:] = saved
+        root.handlers[:] = saved_root
+        logger.setLevel(level)
+
+
+def test_workers_add_the_console_handler_only_when_the_parent_uses_it():
+    from transx2gtfs import logs
+
+    logger = logging.getLogger("transx2gtfs")
+    root = logging.getLogger()
+    saved, saved_root, level = list(logger.handlers), list(root.handlers), logger.level
+    previous = warnings.showwarning
+    try:
+        logger.handlers.clear()
+        root.handlers.clear()
+        assert not logs.console_in_use()
+        logs.configure_worker(None, console=False)
+        assert logger.handlers == []
+        logs.configure_worker(None, console=True)
+        assert logs.console_in_use()
+    finally:
+        logger.handlers[:] = saved
+        root.handlers[:] = saved_root
+        logger.setLevel(level)
+        warnings.showwarning = previous
+
+
+def test_worker_configuration_is_idempotent(tmp_path):
+    from transx2gtfs import logs
+
+    logger = logging.getLogger("transx2gtfs")
+    saved, level = list(logger.handlers), logger.level
+    previous = warnings.showwarning
+    try:
+        # a forked worker inherits the parent's handler and mirror: nothing doubles
+        logs.configure_worker(str(tmp_path / "w.log"))
+        logs.configure_worker(str(tmp_path / "w.log"))
+        files = [h for h in logger.handlers if getattr(h, "transx2gtfs_file", None)]
+        assert len(files) == 1
+        assert getattr(warnings.showwarning, logs.MIRRORED, False)
+        inner = warnings.showwarning
+        with logs.mirror_warnings():
+            assert warnings.showwarning is inner  # not wrapped twice
+        assert warnings.showwarning is inner
+    finally:
+        for h in logger.handlers:
+            if getattr(h, "transx2gtfs_file", None):
+                h.close()
+        logger.handlers[:] = saved
+        logger.setLevel(level)
+        warnings.showwarning = previous
+
+
+def test_warnings_are_not_mirrored_without_any_handler(capsys):
+    from transx2gtfs import logs
+
+    logger = logging.getLogger("transx2gtfs")
+    root = logging.getLogger()
+    saved, saved_root = list(logger.handlers), list(root.handlers)
+    try:
+        logger.handlers.clear()
+        root.handlers.clear()
+        with logs.mirror_warnings():
+            with pytest.warns(UserWarning, match="once"):
+                warnings.warn("shown once", UserWarning, stacklevel=2)
+        # nothing from logging's last-resort handler on stderr
+        assert "shown once" not in capsys.readouterr().err
+    finally:
+        logger.handlers[:] = saved
+        root.handlers[:] = saved_root
+
+
+def test_log_file_keeps_records_with_undecodable_file_names(tmp_path):
+    from transx2gtfs import logs
+
+    handler = logs.add_file_handler(str(tmp_path / "names.log"))
+    try:
+        name = b"caf\xe9.xml".decode("utf-8", "surrogateescape")
+        logs.log.info("Processing %s", name)
+    finally:
+        logs.remove_file_handler(handler)
+    assert "Processing caf\\udce9.xml" in (tmp_path / "names.log").read_text()
+
+
+def test_warnings_are_mirrored_into_the_log(caplog):
+    from transx2gtfs.logs import mirror_warnings
+
+    caplog.set_level(logging.WARNING, logger="transx2gtfs")
+    with pytest.warns(UserWarning, match="mirrored"):
+        with mirror_warnings():
+            warnings.warn("mirrored", UserWarning, stacklevel=2)
+    assert "UserWarning: mirrored" in caplog.text
+    # restored afterwards
+    caplog.clear()
+    with pytest.warns(UserWarning):
+        warnings.warn("not mirrored", UserWarning, stacklevel=2)
+    assert "not mirrored" not in caplog.text
+
+
+def test_cli_log_file_option(tmp_path):
+    from transx2gtfs.__main__ import build_parser, main
+
+    assert build_parser().parse_args(["in", "out"]).log_file is None
+    assert (
+        build_parser().parse_args(["in", "out", "--log-file", "x.log"]).log_file
+        == "x.log"
+    )
+    folder = tmp_path / "in"
+    folder.mkdir()
+    (folder / "some.xml").write_bytes(document())
+    output = str(tmp_path / "gtfs.zip")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        main(
+            [
+                str(folder),
+                output,
+                "--workers",
+                "1",
+                "--log-file",
+                str(tmp_path / "cli.log"),
+            ]
+        )
+    assert "GTFS zipfile was saved to:" in (tmp_path / "cli.log").read_text()

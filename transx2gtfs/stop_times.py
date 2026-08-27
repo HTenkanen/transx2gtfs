@@ -1,7 +1,10 @@
+import logging
 import hashlib
 import warnings
 
 import pandas as pd
+
+log = logging.getLogger("transx2gtfs")
 
 DIRECTIONS = {
     "inbound": 0,
@@ -45,9 +48,9 @@ def get_stop_times(gtfs_info):
     # If there is only a single sequence for a trip, do not export it
     stops_per_trip = stop_times.groupby("trip_id")["stop_id"].transform("size")
     for trip_id in stop_times.loc[stops_per_trip <= 1, "trip_id"].unique():
-        print(
-            "Trip '%s' does not include a sequence of stops, excluding from GTFS."
-            % trip_id
+        log.info(
+            "Trip '%s' does not include a sequence of stops, excluding from GTFS.",
+            trip_id,
         )
     return stop_times[stops_per_trip > 1].reset_index(drop=True)
 

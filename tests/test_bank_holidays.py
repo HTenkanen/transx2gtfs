@@ -1,5 +1,6 @@
 """Tests for the TransXChange bank-holiday table (transx2gtfs.bank_holidays)."""
 
+import logging
 import os
 from datetime import date
 
@@ -177,7 +178,7 @@ def test_bank_holidays_fall_back_to_the_packaged_copy_offline(monkeypatch):
     assert len(read_bank_holidays()) > 0 and len(calls) == 1
 
 
-def test_bank_holidays_fall_back_when_the_download_is_truncated(monkeypatch, capsys):
+def test_bank_holidays_fall_back_when_the_download_is_truncated(monkeypatch, caplog):
     monkeypatch.delenv("TRANSX2GTFS_BANK_HOLIDAYS_PATH", raising=False)
 
     class Truncated:
@@ -193,8 +194,9 @@ def test_bank_holidays_fall_back_when_the_download_is_truncated(monkeypatch, cap
     monkeypatch.setattr(
         bh_module.urllib.request, "urlopen", lambda *a, **k: Truncated()
     )
+    caplog.set_level(logging.INFO, logger="transx2gtfs")
     assert len(read_bank_holidays()) > 0
-    assert "using static file" in capsys.readouterr().out
+    assert "using static file" in caplog.text
 
 
 def test_detect_division_by_stop_area_codes():

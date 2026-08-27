@@ -1,3 +1,4 @@
+import logging
 import sqlite3
 import pandas as pd
 from zipfile import ZipFile, ZIP_DEFLATED
@@ -6,6 +7,8 @@ import io
 import os
 
 from transx2gtfs.txc import read_txc, read_txc_header
+
+log = logging.getLogger("transx2gtfs")
 
 
 def _has_extension(path, extension):
@@ -248,7 +251,7 @@ def save_to_gtfs_zip(output_zip_fp, gtfs_data):
     gtfs_data : dict
         A dictionary containing DataFrames for different GTFS outputs.
     """
-    print("Exporting GTFS\n----------------------")
+    log.info("Exporting GTFS\n----------------------")
 
     # Open stream
     with ZipFile(output_zip_fp, "w") as zf:
@@ -257,7 +260,7 @@ def save_to_gtfs_zip(output_zip_fp, gtfs_data):
 
             if data is not None:
                 if len(data) > 0:
-                    print("Exporting:", fname)
+                    log.info("Exporting: %s", fname)
                     # Save
                     buffer = data.to_csv(
                         None,
@@ -269,8 +272,8 @@ def save_to_gtfs_zip(output_zip_fp, gtfs_data):
 
                     zf.writestr(fname, buffer, compress_type=ZIP_DEFLATED)
                 else:
-                    print("Skipping. No data available for:", fname)
+                    log.info("Skipping. No data available for: %s", fname)
             else:
-                print("Skipping. No data available for:", fname)
-    print("Success.")
-    print("GTFS zipfile was saved to: %s" % output_zip_fp)
+                log.info("Skipping. No data available for: %s", fname)
+    log.info("Success.")
+    log.info("GTFS zipfile was saved to: %s", output_zip_fp)
