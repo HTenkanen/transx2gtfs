@@ -85,7 +85,9 @@ output_filepath : str
     Full filepath to the output GTFS zip-file, e.g. '/home/myuser/data/my_gtfs.zip'
 
 append_to_existing : bool (default is False)
-    Flag for appending to existing gtfs-database. This might be useful if you have
+    Flag for appending to existing gtfs-database (the database of the same output file,
+    `<output without .zip>.db` next to it: `my_gtfs.zip` uses `my_gtfs.db`). This might be
+    useful if you have
     TransXchange .xml files distributed into multiple directories (e.g. separate files for
     train data, tube data and bus data) and you want to merge all those datasets into a single
     GTFS feed.
@@ -99,7 +101,7 @@ file_size_limit : int
 skip_superseded : bool (default is True)
     Leave out files superseded by a newer version of the same service: per ServiceCode, among
     versions whose operating periods overlap only the highest RevisionNumber is converted.
-    Dropped files are printed.
+    Dropped files are logged (INFO).
 
 naptan_path : str (default is None)
     Local NaPTAN CSV to read stop coordinates from. By default TRANSX2GTFS_NAPTAN_PATH is used
@@ -108,7 +110,16 @@ naptan_path : str (default is None)
 
 refresh_naptan : bool (default is False)
     Download the NaPTAN data anew even if the cached copy is recent.
+
+log_file : str (default is None)
+    Append the progress messages and the data warnings of the conversion (with time and
+    level) to this file, in addition to the console.
 ```
+
+Progress messages go through the `transx2gtfs` logger of the standard `logging` module
+(INFO level, printed to the console unless logging has been configured by the application);
+data problems are reported with `warnings.warn` and also written to the log file when one
+is given.
 
 The conversion runs in worker processes. On macOS and Windows those are started with
 the `spawn` method, so when you call `convert()` from a script, put the call under an
@@ -130,9 +141,10 @@ $ transx2gtfs data/my_transxchange_files data/my_converted_gtfs.zip
 $ transx2gtfs --help
 ```
 
-Options: `--append` (append to the intermediate database of a previous run), `--workers N`,
+Options: `--append` (append to the intermediate database of a previous run with the same
+output file), `--workers N`,
 `--file-size-limit MB`, `--keep-superseded` (convert every file, also versions superseded by a
-newer revision of the same service), `--naptan-path FILE`, `--refresh-naptan` and `--version`.
+newer revision of the same service), `--naptan-path FILE`, `--refresh-naptan`, `--log-file FILE` and `--version`.
 
 ### Stop and bank holiday data
 

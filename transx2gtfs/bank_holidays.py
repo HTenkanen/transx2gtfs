@@ -10,6 +10,8 @@ the copy bundled with the package); the displacement names (``ChristmasDayHolida
 and friends) are the gov.uk entries observed on a day other than the fixed date.
 """
 
+import logging
+import http.client
 import io
 import os
 import tempfile
@@ -21,6 +23,8 @@ from urllib.error import URLError
 import pandas as pd
 
 from transx2gtfs.data import get_path
+
+log = logging.getLogger("transx2gtfs")
 
 BANK_HOLIDAYS_URL = "https://www.gov.uk/bank-holidays.json"
 BANK_HOLIDAYS_PATH_ENV = "TRANSX2GTFS_BANK_HOLIDAYS_PATH"
@@ -109,9 +113,10 @@ def _bank_holidays_bytes():
             with urllib.request.urlopen(BANK_HOLIDAYS_URL, timeout=30) as response:
                 data = response.read()
             pd.read_json(io.BytesIO(data))
-        # URLError is an OSError; ValueError covers a non-JSON response
-        except (URLError, OSError, ValueError):
-            print("Could not read bank holidays via Internet, using static file.")
+        # URLError is an OSError; HTTPException covers a truncated body
+        # (IncompleteRead); ValueError covers a non-JSON response
+        except (URLError, OSError, http.client.HTTPException, ValueError):
+            log.info("Could not read bank holidays via Internet, using static file.")
             with open(get_path("bank_holidays"), "rb") as f:
                 data = f.read()
     pd.read_json(io.BytesIO(data))

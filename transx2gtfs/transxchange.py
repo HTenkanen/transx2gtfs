@@ -1,3 +1,4 @@
+import logging
 import dataclasses
 import math
 import re
@@ -18,6 +19,8 @@ from transx2gtfs.calendar import get_weekday_info, parse_active_days
 from transx2gtfs.calendar_dates import encode_exceptions
 from transx2gtfs.routes import get_mode, synthetic_route_ids
 from transx2gtfs.stop_times import exceptions_digest, generate_service_id, get_direction
+
+log = logging.getLogger("transx2gtfs")
 
 DEFAULT_WEEKDAYS = "MondayToSunday"
 OPERATING_PERIOD_DEFAULT_DAYS = 365
@@ -511,7 +514,7 @@ def process_vehicle_journeys(doc, service_jp_info):
     # Iterate over VehicleJourneys
     for i, journey in enumerate(vjourneys):
         if i != 0 and i % 50 == 0:
-            print("Processed %s / %s journeys." % (i, journey_cnt))
+            log.info("Processed %s / %s journeys.", i, journey_cnt)
 
         journey = resolve_vehicle_journey(doc, journey, journey_index, resolved)
 

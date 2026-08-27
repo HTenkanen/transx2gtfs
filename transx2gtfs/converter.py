@@ -46,6 +46,9 @@ import contextlib
 import sqlite3
 import os
 import multiprocessing
+import warnings
+
+from lxml import etree
 from transx2gtfs.stop_times import (
     drop_unresolved_stops,
     get_frequencies,
@@ -69,6 +72,16 @@ from transx2gtfs.dataio import (
     save_to_gtfs_zip,
     get_xml_paths,
 )
+from transx2gtfs.logs import (
+    add_file_handler,
+    configure_console,
+    configure_worker,
+    console_in_use,
+    ensure_info,
+    log,
+    mirror_warnings,
+    remove_file_handler,
+)
 from transx2gtfs.superseded import select_current_files
 from transx2gtfs.txc import TxcHeader
 from transx2gtfs.dataio import (
@@ -81,6 +94,14 @@ from transx2gtfs.distribute import create_workers
 
 # Lock serialising database writes across worker processes (set by _init_worker)
 _db_lock = None
+
+
+def intermediate_db_path(output_filepath):
+    """The SQLite database of a conversion, beside the output: 'feed.zip' ->
+    'feed.db'; any other name gets '.db' appended ('feed.ZIP' -> 'feed.ZIP.db')"""
+    if output_filepath.endswith(".zip"):
+        return output_filepath[: -len(".zip")] + ".db"
+    return output_filepath + ".db"
 
 
 def _row_count(gtfs_db, table):
@@ -111,7 +132,7 @@ def select_files(files):
     """
     The input files to convert once superseded versions are left out: every
     file's header is read and, per service, only the current version is kept
-    (see :mod:`transx2gtfs.superseded`). Dropped files are printed. A file whose
+    (see :mod:`transx2gtfs.superseded`). Dropped files are logged. A file whose
     header cannot be read is kept; the conversion reports it.
     """
     headers = []
@@ -119,12 +140,12 @@ def select_files(files):
         try:
             header = read_xml_header(item)
         except Exception as error:  # noqa: BLE001 - any parse error: keep the file
-            print("Could not read the header of %s: %s" % (_item_name(item), error))
+            log.info("Could not read the header of %s: %s" % (_item_name(item), error))
             header = TxcHeader(file_name=_item_name(item))
         headers.append((item, header))
     selection = select_current_files(headers)
     for dropped in selection.dropped:
-        print(
+        log.info(
             "Skipping %s (ServiceCode %s, revision %s): superseded by %s (revision %s)"
             % (
                 dropped.file_name,
@@ -135,17 +156,20 @@ def select_files(files):
             )
         )
     if selection.dropped:
-        print("Skipped %d superseded file(s)." % len(selection.dropped))
+        log.info("Skipped %d superseded file(s)." % len(selection.dropped))
     return selection.kept
 
 
-def _init_worker(lock, bank_holidays_path=None, naptan_path=None):
+def _init_worker(
+    lock, bank_holidays_path=None, naptan_path=None, log_file=None, console=True
+):
     global _db_lock
     _db_lock = lock
     if bank_holidays_path is not None:
         set_bank_holidays_path(bank_holidays_path)
     if naptan_path is not None:
         set_naptan_path(naptan_path)
+    configure_worker(log_file, console)
 
 
 def process_files(parallel):
@@ -155,102 +179,118 @@ def process_files(parallel):
     gtfs_db = parallel.gtfs_db
 
     for idx, path in enumerate(files):
+        try:
+            tables = _process_file(idx, path, files, file_size_limit)
+        except (etree.XMLSyntaxError, ValueError, KeyError) as error:
+            # A file that cannot be read or converted must not stop the others
+            warnings.warn(
+                "%s: skipped, %s: %s" % (_item_name(path), type(error).__name__, error),
+                UserWarning,
+                stacklevel=2,
+            )
+            continue
+        # Writing is outside the guard: a failure here is not an input problem
+        if tables is not None:
+            _write_to_db(gtfs_db, **tables)
 
-        # If type is string, it is a direct filepath to XML
-        if isinstance(path, str):
-            data, file_size, xml_name = read_unpacked_xml(path)
 
-        # If the type is dictionary contents are in a zip
-        elif isinstance(path, dict):
+def _process_file(idx, path, files, file_size_limit):
+    """Read and convert one input file; the GTFS tables to write, or None"""
 
-            # If the type of value is a string the file can be read directly
-            # from the given Zipfile path, with following structure:
-            # {"transxchange_name.xml" : "/home/data/myzipfile.zip"}
-            if isinstance(list(path.values())[0], str):
-                data, file_size, xml_name = read_xml_inside_zip(path)
+    # If type is string, it is a direct filepath to XML
+    if isinstance(path, str):
+        data, file_size, xml_name = read_unpacked_xml(path)
 
-            # If the type of value is a dictionary the xml-file
-            # is in a ZipFile which is inside another ZipFile.
-            # In such cases, the path stucture is:
-            # {"outermost_zipfile_path.zip": {"inner_zipfile.zip": "transxchange.xml"}}
-            elif isinstance(list(path.values())[0], dict):
-                data, file_size, xml_name = read_xml_inside_nested_zip(path)
-            else:
-                raise ValueError("Something is wrong with the input xml-file paths.")
+    # If the type is dictionary contents are in a zip
+    elif isinstance(path, dict):
+
+        # If the type of value is a string the file can be read directly
+        # from the given Zipfile path, with following structure:
+        # {"transxchange_name.xml" : "/home/data/myzipfile.zip"}
+        if isinstance(list(path.values())[0], str):
+            data, file_size, xml_name = read_xml_inside_zip(path)
+
+        # If the type of value is a dictionary the xml-file
+        # is in a ZipFile which is inside another ZipFile.
+        # In such cases, the path stucture is:
+        # {"outermost_zipfile_path.zip": {"inner_zipfile.zip": "transxchange.xml"}}
+        elif isinstance(list(path.values())[0], dict):
+            data, file_size, xml_name = read_xml_inside_nested_zip(path)
         else:
             raise ValueError("Something is wrong with the input xml-file paths.")
+    else:
+        raise ValueError("Something is wrong with the input xml-file paths.")
 
-        # Filesize
-        size = round((file_size / 1000000), 1)
-        if file_size_limit < size:
-            continue
+    # Filesize
+    size = round((file_size / 1000000), 1)
+    if file_size_limit < size:
+        return
 
-        print("=================================================================")
-        print(
-            "[%s / %s] Processing TransXChange file: %s" % (idx, len(files), xml_name)
+    log.info("=================================================================")
+    log.info("[%s / %s] Processing TransXChange file: %s" % (idx, len(files), xml_name))
+    log.info("Size: %s MB" % size)
+    # Log start time
+    start_t = timeit()
+
+    # Parse stops
+    stop_data = get_stops(data)
+
+    if stop_data is None:
+        log.info("Did not found any valid stops. Skipping..")
+        return
+
+    # Parse agency
+    agency = get_agency(data)
+
+    # Parse GTFS info containing data about trips, calendar, stop_times and calendar_dates
+    gtfs_info = get_gtfs_info(data)
+
+    # Stops without coordinates cannot be exported: their rows are left out
+    gtfs_info = drop_unresolved_stops(gtfs_info, stop_data["stop_id"], xml_name)
+
+    # Parse stop_times
+    stop_times = get_stop_times(gtfs_info)
+
+    # Parse trips
+    trips = get_trips(gtfs_info)
+
+    # Parse calendar
+    calendar = get_calendar(gtfs_info)
+
+    # Parse calendar_dates
+    calendar_dates = get_calendar_dates(gtfs_info)
+
+    # Parse routes
+    routes = get_routes(gtfs_info=gtfs_info, doc=data)
+
+    # Parse frequencies (headway-based journeys)
+    frequencies = get_frequencies(gtfs_info)
+
+    # Only export data into db if there exists valid stop_times data
+    tables = None
+    if len(stop_times) > 0:
+        tables = dict(
+            stop_times=stop_times,
+            stops=stop_data,
+            routes=routes,
+            agency=agency,
+            trips=trips,
+            calendar=calendar,
+            calendar_dates=calendar_dates,
+            frequencies=frequencies,
         )
-        print("Size: %s MB" % size)
-        # Log start time
-        start_t = timeit()
+    else:
+        log.info(
+            "UserWarning: File %s did not contain valid stop_sequence data, skipping."
+            % (xml_name)
+        )
 
-        # Parse stops
-        stop_data = get_stops(data)
+    # Log end time and parse duration
+    end_t = timeit()
+    duration = (end_t - start_t) / 60
 
-        if stop_data is None:
-            print("Did not found any valid stops. Skipping..")
-            continue
-
-        # Parse agency
-        agency = get_agency(data)
-
-        # Parse GTFS info containing data about trips, calendar, stop_times and calendar_dates
-        gtfs_info = get_gtfs_info(data)
-
-        # Stops without coordinates cannot be exported: their rows are left out
-        gtfs_info = drop_unresolved_stops(gtfs_info, stop_data["stop_id"], xml_name)
-
-        # Parse stop_times
-        stop_times = get_stop_times(gtfs_info)
-
-        # Parse trips
-        trips = get_trips(gtfs_info)
-
-        # Parse calendar
-        calendar = get_calendar(gtfs_info)
-
-        # Parse calendar_dates
-        calendar_dates = get_calendar_dates(gtfs_info)
-
-        # Parse routes
-        routes = get_routes(gtfs_info=gtfs_info, doc=data)
-
-        # Parse frequencies (headway-based journeys)
-        frequencies = get_frequencies(gtfs_info)
-
-        # Only export data into db if there exists valid stop_times data
-        if len(stop_times) > 0:
-            _write_to_db(
-                gtfs_db,
-                stop_times=stop_times,
-                stops=stop_data,
-                routes=routes,
-                agency=agency,
-                trips=trips,
-                calendar=calendar,
-                calendar_dates=calendar_dates,
-                frequencies=frequencies,
-            )
-        else:
-            print(
-                "UserWarning: File %s did not contain valid stop_sequence data, skipping."
-                % (xml_name)
-            )
-
-        # Log end time and parse duration
-        end_t = timeit()
-        duration = (end_t - start_t) / 60
-
-        print("It took %s minutes." % round(duration, 1))
+    log.info("It took %s minutes." % round(duration, 1))
+    return tables
 
 
 def _write_to_db(gtfs_db, **tables):
@@ -275,6 +315,7 @@ def convert(
     skip_superseded=True,
     naptan_path=None,
     refresh_naptan=False,
+    log_file=None,
 ):
     """
     Converts TransXchange formatted schedule data into GTFS feed.
@@ -286,7 +327,9 @@ def convert(
     output_filepath : str
         Full filepath to the output GTFS zip-file, e.g. '/home/myuser/data/my_gtfs.zip'
     append_to_existing : bool (default is False)
-        Flag for appending to existing gtfs-database. This might be useful if you
+        Flag for appending to existing gtfs-database (the database of the same
+        output file, '<output without .zip>.db' next to it: 'my_gtfs.zip' uses
+        'my_gtfs.db'). This might be useful if you
         have TransXchange .xml files distributed into multiple directories (e.g.
         separate files for train data, tube data and bus data) and you want to merge
         all those datasets into a single GTFS feed.
@@ -300,7 +343,7 @@ def convert(
         (change archives such as the Bus Open Data Service bulk download hold
         several revisions): per ServiceCode, among versions whose operating
         periods overlap only the highest RevisionNumber is converted. Dropped
-        files are printed.
+        files are logged (INFO).
     naptan_path : str (default is None)
         Local NaPTAN CSV to read stop coordinates from. By default
         ``TRANSX2GTFS_NAPTAN_PATH`` is used if set, else a copy downloaded into
@@ -308,13 +351,57 @@ def convert(
     refresh_naptan : bool (default is False)
         Download the NaPTAN data anew even if the cached copy is recent. Has no
         effect on a file given with ``naptan_path`` or the environment.
+    log_file : str (default is None)
+        Append the progress messages and the data warnings of this conversion
+        (with time and level) to this file, in addition to the console.
     """
+    level = log.level
+    file_handler = None
+    try:
+        configure_console()
+        if console_in_use():
+            # The fallback handler may be left from an earlier run while the
+            # level was restored: progress must reach it during this run
+            ensure_info()
+        if log_file:
+            file_handler = add_file_handler(log_file)
+        with mirror_warnings():
+            return _convert(
+                input_filepath,
+                output_filepath,
+                append_to_existing,
+                worker_cnt,
+                file_size_limit,
+                skip_superseded,
+                naptan_path,
+                refresh_naptan,
+                log_file,
+            )
+    finally:
+        if file_handler is not None:
+            remove_file_handler(file_handler)
+        # The level is the application's; the package changed it only for its
+        # own handlers
+        log.setLevel(level)
+
+
+def _convert(
+    input_filepath,
+    output_filepath,
+    append_to_existing,
+    worker_cnt,
+    file_size_limit,
+    skip_superseded,
+    naptan_path,
+    refresh_naptan,
+    log_file,
+):
     # Total start
     tot_start_t = timeit()
 
-    # Filepath for temporary gtfs db
-    target_dir = os.path.dirname(output_filepath)
-    gtfs_db = os.path.join(target_dir, "gtfs.db")
+    # Filepath for the intermediate database: next to the output, named after
+    # it, so that conversions into one folder do not share a database
+    gtfs_db = intermediate_db_path(output_filepath)
 
     # If append to database is false remove previous gtfs-database if it exists
     if not append_to_existing:
@@ -338,7 +425,7 @@ def convert(
     snapshot = snapshot_bank_holidays_data()
     try:
         # Iterate over files
-        print("Populating database ..")
+        log.info("Populating database ..")
 
         # Create workers
         workers = create_workers(
@@ -353,7 +440,7 @@ def convert(
         with multiprocessing.Pool(
             processes=len(workers),
             initializer=_init_worker,
-            initargs=(lock, snapshot, naptan_file),
+            initargs=(lock, snapshot, naptan_file, log_file, console_in_use()),
         ) as pool:
             pool.map(process_files, workers)
     finally:
@@ -362,11 +449,11 @@ def convert(
         set_naptan_path(None)
         remove_bank_holidays_snapshot(snapshot)
 
-    # Print information about the total time
+    # Log the total time
     tot_end_t = timeit()
     tot_duration = (tot_end_t - tot_start_t) / 60
-    print("===========================================================")
-    print("It took %s minutes in total." % round(tot_duration, 1))
+    log.info("===========================================================")
+    log.info("It took %s minutes in total." % round(tot_duration, 1))
 
     # Nothing to export when no file of this conversion produced trips (all
     # journeys skipped), whatever an existing database already holds

@@ -1,3 +1,4 @@
+import logging
 import http.client
 import os
 import sys
@@ -10,6 +11,8 @@ from urllib.error import URLError
 
 import pandas as pd
 from pyproj import Transformer
+
+log = logging.getLogger("transx2gtfs")
 
 NAPTAN_URL = "https://naptan.api.dft.gov.uk/v1/access-nodes?dataFormat=csv"
 NAPTAN_PATH_ENV = "TRANSX2GTFS_NAPTAN_PATH"
@@ -77,7 +80,7 @@ def download_naptan(target_file, url=NAPTAN_URL):
     os.makedirs(target_dir, mode=0o700, exist_ok=True)
     if os.path.islink(target_file):
         raise OSError("Refusing to replace symlink '%s' with NaPTAN data" % target_file)
-    print("Downloading NaPTAN stops from %s" % url)
+    log.info("Downloading NaPTAN stops from %s", url)
     # Download into a unique partial file so concurrent runs cannot clobber
     # each other, then publish it atomically
     fd, partial = tempfile.mkstemp(prefix="naptan-", suffix=".part", dir=target_dir)
@@ -88,7 +91,7 @@ def download_naptan(target_file, url=NAPTAN_URL):
     finally:
         if os.path.exists(partial):
             os.remove(partial)
-    print("Saved NaPTAN stops to '%s'" % target_file)
+    log.info("Saved NaPTAN stops to '%s'", target_file)
     return target_file
 
 

@@ -1,3 +1,4 @@
+import logging
 import sqlite3
 import pandas as pd
 from zipfile import ZipFile, ZIP_DEFLATED
@@ -6,6 +7,8 @@ import io
 import os
 
 from transx2gtfs.txc import read_txc, read_txc_header
+
+log = logging.getLogger("transx2gtfs")
 
 
 def _has_extension(path, extension):
@@ -140,6 +143,41 @@ def _table_exists(conn, name):
     return conn.execute(query, (name,)).fetchone() is not None
 
 
+def make_route_names_unique(routes):
+    """
+    Routes of one agency sharing route_short_name and route_long_name (trip
+    planners warn about them) are told apart: the first keeps its names, the
+    later ones get ' (<route_id>)' appended to route_long_name — again, should
+    that still clash with a name in use (route ids are unique, so this ends).
+    """
+    names = ["agency_id", "route_short_name", "route_long_name"]
+    if len(routes) == 0 or any(column not in routes.columns for column in names):
+        return routes
+    routes = routes.reset_index(drop=True)
+    renamed = pd.Series(False, index=routes.index)
+    for _ in range(len(routes)):
+        # A missing name and an empty one are the same empty field in GTFS
+        duplicated = routes[names].fillna("").astype(str).duplicated(keep="first")
+        if not duplicated.any():
+            break
+        if not renamed.any():
+            routes = routes.copy()
+        routes.loc[duplicated, "route_long_name"] = (
+            routes.loc[duplicated, "route_long_name"].fillna("").astype(str)
+            + " ("
+            + routes.loc[duplicated, "route_id"].astype(str)
+            + ")"
+        )
+        renamed |= duplicated
+    if renamed.any():
+        log.info(
+            "%d route(s) shared their names with another route of the same agency; "
+            "the route_id was appended to their route_long_name.",
+            int(renamed.sum()),
+        )
+    return routes
+
+
 def generate_gtfs_export(gtfs_db_fp):
     """Reads the gtfs database and generates an export dictionary for GTFS"""
     # Initialize connection
@@ -172,6 +210,7 @@ def generate_gtfs_export(gtfs_db_fp):
         routes = routes.drop("index", axis=1)
     # Drop duplicates
     routes = routes.drop_duplicates(subset=["route_id"])
+    routes = make_route_names_unique(routes)
 
     # Trips
     # -----
@@ -248,7 +287,7 @@ def save_to_gtfs_zip(output_zip_fp, gtfs_data):
     gtfs_data : dict
         A dictionary containing DataFrames for different GTFS outputs.
     """
-    print("Exporting GTFS\n----------------------")
+    log.info("Exporting GTFS\n----------------------")
 
     # Open stream
     with ZipFile(output_zip_fp, "w") as zf:
@@ -257,7 +296,7 @@ def save_to_gtfs_zip(output_zip_fp, gtfs_data):
 
             if data is not None:
                 if len(data) > 0:
-                    print("Exporting:", fname)
+                    log.info("Exporting: %s", fname)
                     # Save
                     buffer = data.to_csv(
                         None,
@@ -269,8 +308,8 @@ def save_to_gtfs_zip(output_zip_fp, gtfs_data):
 
                     zf.writestr(fname, buffer, compress_type=ZIP_DEFLATED)
                 else:
-                    print("Skipping. No data available for:", fname)
+                    log.info("Skipping. No data available for: %s", fname)
             else:
-                print("Skipping. No data available for:", fname)
-    print("Success.")
-    print("GTFS zipfile was saved to: %s" % output_zip_fp)
+                log.info("Skipping. No data available for: %s", fname)
+    log.info("Success.")
+    log.info("GTFS zipfile was saved to: %s", output_zip_fp)

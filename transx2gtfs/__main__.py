@@ -54,6 +54,11 @@ def build_parser():
         help="download the NaPTAN data anew even if the cached copy is recent",
     )
     parser.add_argument(
+        "--log-file",
+        default=None,
+        help="append the progress messages and data warnings to this file as well",
+    )
+    parser.add_argument(
         "--version", action="version", version=f"%(prog)s {__version__}"
     )
     return parser
@@ -70,6 +75,7 @@ def main(argv=None):
         skip_superseded=not args.keep_superseded,
         naptan_path=args.naptan_path,
         refresh_naptan=args.refresh_naptan,
+        log_file=args.log_file,
     )
 
 
