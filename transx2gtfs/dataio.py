@@ -5,7 +5,7 @@ import csv
 import io
 import os
 
-from transx2gtfs.txc import read_txc
+from transx2gtfs.txc import read_txc, read_txc_header
 
 
 def _has_extension(path, extension):
@@ -76,6 +76,30 @@ def read_unpacked_xml(xml_path):
     """
     file_size = os.path.getsize(xml_path)
     return read_txc(xml_path), file_size, os.path.basename(xml_path)
+
+
+def read_xml_header(xml_path):
+    """
+    The :class:`~transx2gtfs.txc.TxcHeader` of an input item of any kind
+    :func:`get_xml_paths` produces: a path, a zip member or a nested zip member.
+    """
+    if isinstance(xml_path, str):
+        return read_txc_header(xml_path)
+    if isinstance(xml_path, dict):
+        value = list(xml_path.values())[0]
+        if isinstance(value, str):
+            filename = list(xml_path.keys())[0]
+            with ZipFile(value) as z, z.open(filename) as member:
+                return read_txc_header(member, file_name=filename)
+        if isinstance(value, dict):
+            zip_filepath = list(xml_path.keys())[0]
+            inner_zip_name = list(value.keys())[0]
+            xml_name = list(value.values())[0]
+            with ZipFile(zip_filepath) as z:
+                inner_zip = ZipFile(io.BytesIO(z.read(inner_zip_name)))
+            with inner_zip.open(xml_name) as member:
+                return read_txc_header(member, file_name=xml_name)
+    raise ValueError("Something is wrong with the input xml-file paths.")
 
 
 def read_xml_inside_zip(xml_path):

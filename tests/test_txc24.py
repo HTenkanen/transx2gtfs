@@ -1735,3 +1735,88 @@ def test_convert_txc24_fixtures(tmp_path):
     # three of the four files produce trips (the HRCS2 journeys never operate:
     # HolidaysOnly with every holiday removed), so three operators
     assert sorted(gtfs["agency.txt"]["agency_id"]) == ["7778078", "FAB", "tkt_oid"]
+
+
+# Superseded files -----------------------------------------------------------------
+
+
+def revision(number, departure, modified="2027-01-10T10:00:00"):
+    return document(
+        root_attributes=' RevisionNumber="%s" ModificationDateTime="%s"'
+        % (number, modified),
+        journeys=[journey("VJ_1", departure=departure)],
+    )
+
+
+def departures(output):
+    with ZipFile(output) as zf:
+        stop_times = pd.read_csv(io.BytesIO(zf.read("stop_times.txt")), dtype=str)
+    return sorted(stop_times[stop_times["stop_sequence"] == "1"]["departure_time"])
+
+
+def test_convert_skips_superseded_files(tmp_path, capsys):
+    folder = tmp_path / "in"
+    folder.mkdir()
+    (folder / "old.xml").write_bytes(revision(3, "08:00:00"))
+    (folder / "new.xml").write_bytes(revision(16, "09:00:00"))
+    output = str(tmp_path / "gtfs.zip")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        transx2gtfs.convert(str(folder), output, worker_cnt=1)
+    assert departures(output) == ["09:00:00"]
+    out = capsys.readouterr().out
+    assert (
+        "Skipping old.xml (ServiceCode S1, revision 3): superseded by new.xml "
+        "(revision 16)"
+    ) in out
+    assert "Skipped 1 superseded file(s)." in out
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        transx2gtfs.convert(str(folder), output, worker_cnt=1, skip_superseded=False)
+    assert departures(output) == ["08:00:00", "09:00:00"]
+    assert "superseded by" not in capsys.readouterr().out
+
+
+def test_superseded_files_inside_archives_are_skipped_too(tmp_path):
+    archive = tmp_path / "bods.zip"
+    with ZipFile(archive, "w") as zf:
+        zf.writestr("old.xml", revision(3, "08:00:00"))
+        zf.writestr("new.xml", revision(16, "09:00:00"))
+        # a nested archive holding a third, older revision
+        inner = io.BytesIO()
+        with ZipFile(inner, "w") as inner_zf:
+            inner_zf.writestr("older.xml", revision(1, "07:00:00"))
+        zf.writestr("inner.zip", inner.getvalue())
+    output = str(tmp_path / "gtfs.zip")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        transx2gtfs.convert(str(archive), output, worker_cnt=1)
+    assert departures(output) == ["09:00:00"]
+
+
+def test_cli_keeps_superseded_files_on_request(tmp_path):
+    from transx2gtfs.__main__ import build_parser, main
+
+    assert build_parser().parse_args(["in", "out"]).keep_superseded is False
+    assert build_parser().parse_args(["in", "out", "--keep-superseded"]).keep_superseded
+    folder = tmp_path / "in"
+    folder.mkdir()
+    (folder / "old.xml").write_bytes(revision(3, "08:00:00"))
+    (folder / "new.xml").write_bytes(revision(16, "09:00:00"))
+    output = str(tmp_path / "gtfs.zip")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        main([str(folder), output, "--workers", "1", "--keep-superseded"])
+    assert departures(output) == ["08:00:00", "09:00:00"]
+
+
+def test_files_whose_header_cannot_be_read_are_kept(tmp_path, capsys):
+    from transx2gtfs.converter import select_files
+
+    good = tmp_path / "good.xml"
+    good.write_bytes(revision(3, "08:00:00"))
+    broken = tmp_path / "broken.xml"
+    broken.write_bytes(b"<TransXChange><Services><Service>")
+    assert select_files([str(good), str(broken)]) == [str(good), str(broken)]
+    assert "Could not read the header of broken.xml" in capsys.readouterr().out
