@@ -65,8 +65,10 @@ def test_converting_to_gtfs(data_dir, tmp_path):
     assert set(gtfs["trips.txt"]["service_id"]) == set(
         gtfs["calendar.txt"]["service_id"]
     )
-    # No bank holiday falls inside the fixtures' operating periods
-    assert "calendar_dates.txt" not in gtfs
+    # The ferry runs on all bank holidays in addition to weekends (type 1)
+    calendar_dates = gtfs["calendar_dates.txt"]
+    assert set(calendar_dates["exception_type"]) == {"1"}
+    assert set(calendar_dates["service_id"]) <= set(gtfs["calendar.txt"]["service_id"])
     assert set(gtfs["routes.txt"]["agency_id"]) <= set(gtfs["agency.txt"]["agency_id"])
     assert set(gtfs["routes.txt"]["route_type"]) == {"1", "3", "4"}
 

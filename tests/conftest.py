@@ -1,4 +1,6 @@
+import io
 import pathlib
+from zipfile import ZipFile
 
 import pytest
 
@@ -6,6 +8,13 @@ from transx2gtfs.data import get_path
 
 DATA_DIR = pathlib.Path(__file__).parent / "data"
 UNPACKED_DIR = DATA_DIR / "unpacked"
+TXC24_ZIP = DATA_DIR / "txc24" / "fixtures.zip"
+
+
+def txc24_fixture(name):
+    """A TransXChange 2.4/2.5 fixture from fixtures.zip as a binary file object"""
+    with ZipFile(TXC24_ZIP) as zf:
+        return io.BytesIO(zf.read(name))
 
 
 @pytest.fixture(autouse=True)

@@ -1,0 +1,5 @@
+route_id,agency_id,route_short_name,route_long_name,route_type
+1,7778078,FWC001,Oak Corner - The Sandon School,3
+2,7778078,FWC001,The Sandon School - Oak Corner,3
+3,7778078,R1,Bicknacre - The Sandon School,3
+4,7778078,R1,The Sandon School - Bicknacre,3

@@ -253,7 +253,9 @@ def test_single_element_document(no_download):
     assert stop_times["arrival_time"].to_list() == ["11:02:00", "11:12:00"]
 
     trips = get_trips(gtfs_info)
-    assert trips["service_id"].to_list() == ["S_1_20190223_20191222_MondayToFriday"]
+    # AllBankHolidays non-operation gives the calendar exceptions, hence a hashed id
+    (service_id,) = trips["service_id"].to_list()
+    assert service_id.startswith("S_1_20190223_20191222_MondayToFriday_")
 
     routes = get_routes(gtfs_info, data)
     assert routes["route_id"].to_list() == ["R_1"]

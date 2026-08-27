@@ -187,6 +187,14 @@ def generate_gtfs_export(gtfs_db_fp):
         # If data is not available pass empty DataFrame
         calendar_dates = pd.DataFrame()
 
+    # Frequencies
+    # -----------
+    if _table_exists(conn, "frequencies"):
+        frequencies = pd.read_sql_query("SELECT * FROM frequencies", conn)
+        frequencies = frequencies.drop_duplicates(subset=["trip_id", "start_time"])
+    else:
+        frequencies = pd.DataFrame()
+
     # Create dictionary for GTFS data
     gtfs_data = dict(
         agency=agency.copy(),
@@ -196,6 +204,7 @@ def generate_gtfs_export(gtfs_db_fp):
         stops=stops.copy(),
         stop_times=stop_times.copy(),
         trips=trips.copy(),
+        frequencies=frequencies.copy(),
     )
 
     # Close connection

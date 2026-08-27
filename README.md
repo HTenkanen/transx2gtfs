@@ -15,11 +15,15 @@ help solving them by [raising an issue](https://github.com/HTenkanen/transx2gtfs
 
  - Reads TransXchange xml-files and converts into GTFS feed with all necessary information 
  according the General Transit Feed Specification.
- - Works and tested against different TransXchange schemas (TfL schema and TXC 2.1)
+ - Works and tested against different TransXchange schemas: the TfL schema, TXC 2.1 and the
+ TXC 2.4/2.5 files published by the [Bus Open Data Service](https://data.bus-data.dft.gov.uk/)
+ and the Traveline National Dataset (multi-section journey patterns, journeys defined by
+ reference, frequency-based journeys written to `frequencies.txt`, wait times and journey
+ timing-link overrides, interpolated times at non-timing stops, several lines per service).
  - Combines multiple TransXchange files into a single GTFS feed if present in the same folder.
  - Finds and reads all XML files present in ZipFiles, nested ZipFiles and unpacked directories. 
  - Uses multiprocessing to parallelize the conversion process.
- - Parses bank holidays (from [gov.uk](https://www.gov.uk/bank-holidays)) affecting transit operations at the given time span of the TransXChange feed, which are written to calendar_dates.txt.
+ - Parses bank holidays (from [gov.uk](https://www.gov.uk/bank-holidays)) affecting transit operations at the given time span of the TransXChange feed, which are written to calendar_dates.txt: every TransXChange holiday name and group (`AllBankHolidays`, `Christmas`, `HolidayMondays`, displacement holidays, …), Scottish holidays for files whose stops are in Scotland, `SpecialDaysOperation` date ranges and `ServicedOrganisations` (term-time) calendars.
  - Reads stop information automatically from the [NaPTAN](https://www.gov.uk/government/publications/national-public-transport-access-node-schema) API (or from a local NaPTAN CSV file).
  
 ## Why yet another converter?
